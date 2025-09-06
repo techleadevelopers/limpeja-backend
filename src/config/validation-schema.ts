@@ -90,5 +90,6 @@ export const validationSchema = Joi.object({
   PAGSEGURO_API_BASE_URL: Joi.string().uri().required().description('URL base da API do PagSeguro (sandbox ou produção)'),
 
   // NOVO: Variável para Redis (para locks e BullMQ)
-  REDIS_URL: Joi.string().uri().required().description('URL de conexão com o servidor Redis'),
+  REDIS_URL: Joi.string().required().description('URL de conexão com o servidor Redis'),
+
 });
