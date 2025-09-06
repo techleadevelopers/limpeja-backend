@@ -1,4 +1,3 @@
-// src/main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe, BadRequestException } from '@nestjs/common'; // Importar BadRequestException
@@ -47,8 +46,8 @@ async function bootstrap() {
   const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:8081',
-    // Adicione aqui outras origens se necessário, como a URL do front-end de produção
-    // 'https://admin.seu-site.com'
+    // Adicione a URL de produção do seu front-end aqui
+    'https://limpe-ja-app-production.up.railway.app',
   ];
 
   app.enableCors({
