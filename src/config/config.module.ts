@@ -10,9 +10,7 @@ import configuration from './configuration';
       isGlobal: true, // Torna o ConfigModule disponível globalmente
       load: [configuration], // Carrega a configuração customizada
       validationSchema, // Schema de validação para as variáveis de ambiente
-      envFilePath: `.env`, // Caminho para o arquivo .env local
-      ignoreEnvFile: process.env.NODE_ENV === 'production', 
-      // ignora o .env local quando estiver em produção (deploy Railway)
+      envFilePath: `.env`, // Caminho para o arquivo .env
     }),
   ],
 })
