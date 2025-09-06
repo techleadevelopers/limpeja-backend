@@ -1,0 +1,53 @@
+// configuration.ts
+export default () => ({
+  port: parseInt(process.env.PORT, 10) || 3000,
+  databaseUrl: process.env.DATABASE_URL,
+  jwt: {
+    secret: process.env.JWT_SECRET,
+    expirationTime: process.env.JWT_EXPIRATION_TIME,
+  },
+  // Adicionando a URL base da aplicação
+  appBaseUrl: process.env.APP_BASE_URL,
+  googleCloudStorage: {
+    projectId: process.env.GCS_PROJECT_ID,
+    keyFile: process.env.GCS_KEY,
+    bucketName: process.env.GCS_BUCKET_NAME,
+  },
+  // Configuração para as APIs de terceiros da Cellereit
+  thirdPartyApis: { // Agrupando todas as APIs de terceiros em um objeto para melhor organização
+    facematch: { // Nova configuração para Facematch
+      apiUrl: process.env.THIRD_PARTY_FACEMATCH_API_URL,
+      apiKey: process.env.THIRD_PARTY_FACEMATCH_API_KEY,
+    },
+  },
+  // NOVAS CONFIGURAÇÕES: Email Service
+  email: {
+    provider: process.env.EMAIL_SERVICE_PROVIDER,
+    sendgridApiKey: process.env.SENDGRID_API_KEY,
+    smtpHost: process.env.SMTP_HOST,
+    smtpPort: parseInt(process.env.SMTP_PORT, 10),
+    smtpUser: process.env.SMTP_USER,
+    smtpPass: process.env.SMTP_PASS,
+    defaultFrom: process.env.DEFAULT_EMAIL_FROM,
+  },
+  // NOVAS CONFIGURAÇÕES: SMS Service
+  sms: {
+    provider: process.env.SMS_SERVICE_PROVIDER,
+    twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
+    twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
+    twilioPhoneNumber: process.env.TWILIO_PHONE_NUMBER,
+    // Adicionando a nova variável para o Twilio Verify Service SID
+    twilioVerifyServiceSid: process.env.TWILIO_VERIFY_SERVICE_SID,
+  },
+  // NOVAS CONFIGURAÇÕES: Geocoding Service
+  geocoding: {
+    provider: process.env.GEOCODING_API_PROVIDER,
+    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
+    openStreetMapNominatimUrl: process.env.OPENSTREETMAP_NOMINATIM_URL,
+  },
+  // NOVAS CONFIGURAÇÕES: PagSeguro
+  pagseguro: {
+    apiToken: process.env.PAGSEGURO_API_TOKEN,
+    apiBaseUrl: process.env.PAGSEGURO_API_BASE_URL,
+  },
+});
