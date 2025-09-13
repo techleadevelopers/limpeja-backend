@@ -46,7 +46,7 @@ async function bootstrap() {
   const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:8081',
-    'http://localhost:8082',
+    
     'https://limpe-ja-app-production.up.railway.app',
   ];
 
