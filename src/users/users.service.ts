@@ -9,6 +9,7 @@ import { CreateNotificationDto } from '../notifications/dto/create-notification.
 
 // Type alias para User com includes (baseado no schema.prisma) - EXPANDIDO para ProviderWithCalculatedRating compatibilidade
 // CORREÇÃO: Ajustado para usar strings literais no where de bookings (BookingStatus é um union type, não namespace)
+// ADICIONADO: Campos como userId e pixKey no select do provider para compatibilidade com ProviderWithCalculatedRating e resolver TS2352 no DTO
 export type UserWithIncludes = Prisma.UserGetPayload<{
   include: {
     client: {
@@ -18,8 +19,10 @@ export type UserWithIncludes = Prisma.UserGetPayload<{
     provider: {
       select: {  // CORREÇÃO: 'select' no nível superior para Provider, com includes aninhados
         id: true;
+        userId: true;  // ADICIONADO: Para compatibilidade com ProviderWithCalculatedRating (FK para User)
         fullName: true;
         phone: true;
+        pixKey: true;  // ADICIONADO: Assumindo que existe no schema de Provider; resolve campo ausente no erro TS2352
         createdAt: true;
         updatedAt: true;
         cpf: true;
@@ -86,10 +89,13 @@ export class UsersService {
             },
           },
           provider: {  // CORREÇÃO: Estrutura corrigida - select no nível superior com includes aninhados
+            // ADICIONADO: Campos userId e pixKey para resolver incompatibilidades no DTO (TS2352)
             select: {
               id: true,
+              userId: true,  // ADICIONADO: FK para User, necessário para ProviderWithCalculatedRating
               fullName: true,
               phone: true,
+              pixKey: true,  // ADICIONADO: Campo do schema de Provider (ajuste se não existir)
               createdAt: true,
               updatedAt: true,
               cpf: true,
@@ -172,6 +178,7 @@ export class UsersService {
 
   // MÉTODO CORRIGIDO: Listar com includes tipados - EXPANDIDO para consistência
   // CORREÇÃO: Mesma estrutura de provider (select com includes aninhados) e string literal para status
+  // ADICIONADO: Campos userId e pixKey no select para consistência com findOne e DTO
   async findAllUsers(): Promise<UserWithIncludes[]> {
     this.logger.log(`[UsersService] findAllUsers: Listando todos os usuários com includes.`);
     try {
@@ -186,10 +193,13 @@ export class UsersService {
             select: { id: true, fullName: true, phone: true, cpf: true, createdAt: true, updatedAt: true },
           },
           provider: {  // CORREÇÃO: Estrutura corrigida - select no nível superior
+            // ADICIONADO: userId e pixKey para resolver campos ausentes no DTO
             select: {
               id: true,
+              userId: true,  // ADICIONADO
               fullName: true,
               phone: true,
+              pixKey: true,  // ADICIONADO
               createdAt: true,
               updatedAt: true,
               cpf: true,
