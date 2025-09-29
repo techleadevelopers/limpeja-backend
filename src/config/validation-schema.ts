@@ -1,4 +1,4 @@
-// validation-schema.ts
+// src/config/validation-schema.ts
 import * as Joi from 'joi';
 
 export const validationSchema = Joi.object({
@@ -7,20 +7,28 @@ export const validationSchema = Joi.object({
   DATABASE_URL: Joi.string().required(),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_TIME: Joi.string().required(),
-
-  // URL base da sua aplicação (necessária para webhooks, ex: PagSeguro)
   APP_BASE_URL: Joi.string().uri().required().description('URL base da aplicação para webhooks e redirecionamentos.'),
 
-  // Variáveis de ambiente para Google Cloud Storage (GCS)
+  // Throttle (novo)
+  THROTTLE_TTL: Joi.number().default(60).description('TTL para throttle em segundos'),
+  THROTTLE_LIMIT: Joi.number().default(10).description('Limite de requests por TTL'),
+
+  // Redis (já existe, mas confirme)
+  REDIS_URL: Joi.string().uri({ scheme: ['redis', 'rediss'] }).required().description('URL de conexão com o servidor Redis'),
+
+  // Sentry (novo)
+  SENTRY_DSN: Joi.string().optional().description('DSN do Sentry para monitoramento de erros'),
+
+  // Google Cloud Storage
   GCS_PROJECT_ID: Joi.string().required().description('Google Cloud Project ID'),
   GCS_KEY: Joi.string().required().description('Base64 encoded Google Cloud Service Account key file content'),
   GCS_BUCKET_NAME: Joi.string().required().description('Name of the Google Cloud Storage bucket'),
 
-  // NOVAS VARIÁVEIS DE AMBIENTE: Cellereit Facematch
+  // Cellereit Facematch
   THIRD_PARTY_FACEMATCH_API_URL: Joi.string().uri().required().description('URL da API de terceiros para comparação facial e liveness check (Cellereit Facematch)'),
   THIRD_PARTY_FACEMATCH_API_KEY: Joi.string().required().description('Chave da API de terceiros para comparação facial e liveness check (Cellereit Facematch)'),
 
-  // NOVAS VARIÁVEIS DE AMBIENTE: Email Service
+  // Email Service
   EMAIL_SERVICE_PROVIDER: Joi.string().optional().description('Provedor de serviço de e-mail (ex: SENDGRID, SMTP)'),
   SENDGRID_API_KEY: Joi.string().when('EMAIL_SERVICE_PROVIDER', {
     is: 'SENDGRID',
@@ -49,7 +57,7 @@ export const validationSchema = Joi.object({
   }).description('Senha SMTP'),
   DEFAULT_EMAIL_FROM: Joi.string().email().required().description('Email padrão do remetente'),
 
-  // NOVAS VARIÁVEIS DE AMBIENTE: SMS Service
+  // SMS Service
   SMS_SERVICE_PROVIDER: Joi.string().optional().description('Provedor de serviço de SMS (ex: TWILIO)'),
   TWILIO_ACCOUNT_SID: Joi.string().when('SMS_SERVICE_PROVIDER', {
     is: 'TWILIO',
@@ -66,13 +74,13 @@ export const validationSchema = Joi.object({
     then: Joi.string().required(),
     otherwise: Joi.optional(),
   }).description('Número de telefone Twilio'),
-  TWILIO_VERIFY_SERVICE_SID: Joi.string().when('SMS_SERVICE_PROVIDER', { // Nova variável para Twilio Verify
+  TWILIO_VERIFY_SERVICE_SID: Joi.string().when('SMS_SERVICE_PROVIDER', {
     is: 'TWILIO',
     then: Joi.string().required(),
     otherwise: Joi.optional(),
   }).description('Twilio Verify Service SID'),
 
-  // NOVAS VARIÁVEIS DE AMBIENTE: Geocoding Service
+  // Geocoding Service
   GEOCODING_API_PROVIDER: Joi.string().optional().description('Provedor da API de geocodificação (ex: GOOGLE_MAPS, OPENSTREETMAP)'),
   GOOGLE_MAPS_API_KEY: Joi.string().when('GEOCODING_API_PROVIDER', {
     is: 'GOOGLE_MAPS',
@@ -85,11 +93,7 @@ export const validationSchema = Joi.object({
     otherwise: Joi.optional(),
   }).description('URL do Nominatim para OpenStreetMap'),
 
-  // NOVAS VARIÁVEIS DE AMBIENTE: PagSeguro
+  // PagSeguro
   PAGSEGURO_API_TOKEN: Joi.string().required().description('Token da API do PagSeguro'),
   PAGSEGURO_API_BASE_URL: Joi.string().uri().required().description('URL base da API do PagSeguro (sandbox ou produção)'),
-
-  // NOVO: Variável para Redis (para locks e BullMQ)
-  REDIS_URL: Joi.string().required().description('URL de conexão com o servidor Redis'),
-
 });

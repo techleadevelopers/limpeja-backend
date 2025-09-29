@@ -1,26 +1,48 @@
-// configuration.ts
+// src/config/configuration.ts
 export default () => ({
+  // Configurações básicas
   port: parseInt(process.env.PORT, 10) || 3000,
   databaseUrl: process.env.DATABASE_URL,
+  appBaseUrl: process.env.APP_BASE_URL,
+
+  // JWT
   jwt: {
     secret: process.env.JWT_SECRET,
     expirationTime: process.env.JWT_EXPIRATION_TIME,
   },
-  // Adicionando a URL base da aplicação
-  appBaseUrl: process.env.APP_BASE_URL,
+
+  // Throttle (ausente antes)
+  throttle: {
+    ttl: parseInt(process.env.THROTTLE_TTL, 10) || 60,
+    limit: parseInt(process.env.THROTTLE_LIMIT, 10) || 10,
+  },
+
+  // Redis (ausente antes - para Bull, Locks, Cache)
+  redis: {
+    url: process.env.REDIS_URL || 'redis://localhost:6379',
+  },
+
+  // Sentry (ausente antes)
+  sentry: {
+    dsn: process.env.SENTRY_DSN,
+  },
+
+  // Google Cloud Storage
   googleCloudStorage: {
     projectId: process.env.GCS_PROJECT_ID,
     keyFile: process.env.GCS_KEY,
     bucketName: process.env.GCS_BUCKET_NAME,
   },
-  // Configuração para as APIs de terceiros da Cellereit
-  thirdPartyApis: { // Agrupando todas as APIs de terceiros em um objeto para melhor organização
-    facematch: { // Nova configuração para Facematch
+
+  // APIs de terceiros
+  thirdPartyApis: {
+    facematch: {
       apiUrl: process.env.THIRD_PARTY_FACEMATCH_API_URL,
       apiKey: process.env.THIRD_PARTY_FACEMATCH_API_KEY,
     },
   },
-  // NOVAS CONFIGURAÇÕES: Email Service
+
+  // Email
   email: {
     provider: process.env.EMAIL_SERVICE_PROVIDER,
     sendgridApiKey: process.env.SENDGRID_API_KEY,
@@ -30,22 +52,24 @@ export default () => ({
     smtpPass: process.env.SMTP_PASS,
     defaultFrom: process.env.DEFAULT_EMAIL_FROM,
   },
-  // NOVAS CONFIGURAÇÕES: SMS Service
+
+  // SMS
   sms: {
     provider: process.env.SMS_SERVICE_PROVIDER,
     twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
     twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
     twilioPhoneNumber: process.env.TWILIO_PHONE_NUMBER,
-    // Adicionando a nova variável para o Twilio Verify Service SID
     twilioVerifyServiceSid: process.env.TWILIO_VERIFY_SERVICE_SID,
   },
-  // NOVAS CONFIGURAÇÕES: Geocoding Service
+
+  // Geocoding
   geocoding: {
     provider: process.env.GEOCODING_API_PROVIDER,
     googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
     openStreetMapNominatimUrl: process.env.OPENSTREETMAP_NOMINATIM_URL,
   },
-  // NOVAS CONFIGURAÇÕES: PagSeguro
+
+  // PagSeguro
   pagseguro: {
     apiToken: process.env.PAGSEGURO_API_TOKEN,
     apiBaseUrl: process.env.PAGSEGURO_API_BASE_URL,

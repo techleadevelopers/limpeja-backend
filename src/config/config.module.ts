@@ -7,13 +7,22 @@ import configuration from './configuration';
 @Module({
   imports: [
     NestConfigModule.forRoot({
-      isGlobal: true, // Torna o ConfigModule disponível globalmente
+      isGlobal: true, // Disponível globalmente
       load: [configuration], // Carrega a configuração customizada
-      validationSchema, // Schema de validação para as variáveis de ambiente
-      envFilePath: `.env`, // Caminho para o arquivo .env local
-      ignoreEnvFile: process.env.NODE_ENV === 'production', 
-      // ignora o .env local quando estiver em produção (deploy Railway)
+      validationSchema, // Schema de validação
+      envFilePath: [ // Suporte para múltiplos arquivos .env
+        '.env.local',
+        '.env',
+        `.env.${process.env.NODE_ENV || 'development'}`,
+      ],
+      validationOptions: { // Mesmas opções do app.module.ts original
+        allowUnknown: true,
+        abortEarly: true,
+      },
+      // Ignora erros de cache em dev
+      cache: process.env.NODE_ENV === 'production',
     }),
   ],
+  exports: [NestConfigModule], // Exporta para outros módulos usarem ConfigService
 })
 export class ConfigModule {}
