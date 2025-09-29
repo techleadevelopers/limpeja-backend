@@ -8,6 +8,7 @@ import { QueuesService } from '../queues/queues.service';
 import { CreateNotificationDto } from '../notifications/dto/create-notification.dto';
 
 // Type alias para User com includes (baseado no schema.prisma) - EXPANDIDO para ProviderWithCalculatedRating compatibilidade
+// CORREÇÃO: Ajustado para usar strings literais no where de bookings (BookingStatus é um union type, não namespace)
 export type UserWithIncludes = Prisma.UserGetPayload<{
   include: {
     client: {
@@ -15,27 +16,7 @@ export type UserWithIncludes = Prisma.UserGetPayload<{
       select: { id: true; fullName: true; phone: true; cpf: true; createdAt: true; updatedAt: true };
     };
     provider: {
-      include: {
-        address: true,
-        user: true,  // Inclui User para email, role, etc.
-        providerServices: {
-          include: { service: true }  // Para services do provider
-        },
-        reviewsReceived: {
-          include: {
-            client: {
-              include: { user: true }
-            }
-          }
-        },
-        bookings: {
-          where: { status: 'COMPLETED' },  // CORRIGIDO: String literal em vez de BookingStatus.COMPLETED
-          orderBy: { createdAt: 'desc' },  // CORRIGIDO: String literal em vez de Prisma.SortOrder.desc
-          take: 100,
-        },
-        availability: true  // Se existir no schema (ex: Availability model)
-      };
-      select: {
+      select: {  // CORREÇÃO: 'select' no nível superior para Provider, com includes aninhados
         id: true;
         fullName: true;
         phone: true;
@@ -45,11 +26,28 @@ export type UserWithIncludes = Prisma.UserGetPayload<{
         dateOfBirth: true;
         yearsOfExperience: true;
         avatarUrl: true;
-        verificationStatus: true;  // CORRIGIDO: 'true' em vez de VerificationStatus
+        verificationStatus: true;
         bio: true;
         badges: true;  // Array de badges
         acceptanceRate: true;
         averageResponseTime: true;
+        address: true;  // Inclui full Address
+        providerServices: {
+          include: { service: true }  // Para services do provider
+        };
+        reviewsReceived: {
+          include: {
+            client: {
+              include: { user: true }
+            }
+          }
+        };
+        bookings: {
+          where: { status: 'COMPLETED' },  // CORREÇÃO: String literal (BookingStatus é union type)
+          orderBy: { createdAt: 'desc' },  // CORREÇÃO: String literal para orderBy
+          take: 100,
+        };
+        availability: true  // Se existir no schema (ex: Availability model)
       };
     };
     loyalty: true;
@@ -87,10 +85,23 @@ export class UsersService {
               updatedAt: true,
             },
           },
-          provider: {
-            include: {
-              address: true,
-              user: true,  // EXPANDIDO: Para email e outros do User
+          provider: {  // CORREÇÃO: Estrutura corrigida - select no nível superior com includes aninhados
+            select: {
+              id: true,
+              fullName: true,
+              phone: true,
+              createdAt: true,
+              updatedAt: true,
+              cpf: true,
+              dateOfBirth: true,
+              yearsOfExperience: true,
+              avatarUrl: true,
+              verificationStatus: true,  // CORREÇÃO: 'true' para incluir o campo (enum é inferido)
+              bio: true,
+              badges: true,
+              acceptanceRate: true,
+              averageResponseTime: true,
+              address: true,  // Inclui full Address (sem sub-select, pois queremos todos os campos)
               providerServices: {
                 include: { service: true }
               },
@@ -102,28 +113,13 @@ export class UsersService {
                 }
               },
               bookings: {
-                where: { status: 'COMPLETED' },  // CORRIGIDO: String literal
-                orderBy: { createdAt: 'desc' },  // CORRIGIDO: String literal
+                where: { status: 'COMPLETED' },  // CORREÇÃO: String literal (BookingStatus é union type, não namespace)
+                orderBy: { createdAt: 'desc' },  // CORREÇÃO: String literal
                 take: 100,
               },
               availability: true
-            },
-            select: {
-              id: true,
-              fullName: true,
-              phone: true,
-              createdAt: true,
-              updatedAt: true,
-              cpf: true,
-              dateOfBirth: true,
-              yearsOfExperience: true,
-              avatarUrl: true,
-              verificationStatus: true,  // CORRIGIDO: 'true' em vez de VerificationStatus
-              bio: true,
-              badges: true,
-              acceptanceRate: true,
-              averageResponseTime: true,
-            },
+            }
+            // CORREÇÃO: Removido 'include: { user: true }' (redundante e causa loop circular)
           },
           loyalty: true, // Do schema: Loyalty? em User
           // CORRIGIDO: Usando nomes corretos do schema.prisma
@@ -139,8 +135,20 @@ export class UsersService {
     } catch (error) {
       this.logger.error(`[UsersService] findOne: Erro na query Prisma para ID ${id}: ${error.message}`);
       // Fallback: Query simples sem includes se falhar (ex: relação inexistente)
+      // CORREÇÃO: Mapeie para UserWithIncludes com campos opcionais como null para compatibilidade de tipo
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        return await this.prisma.user.findUnique({ where: { id } }) as UserWithIncludes | null;
+        const basicUser = await this.prisma.user.findUnique({ where: { id } });
+        if (basicUser) {
+          return {
+            ...basicUser,
+            client: null,
+            provider: null,
+            loyalty: null,
+            referredBy: [],
+            referralsMade: [],
+          } as UserWithIncludes;
+        }
+        return null;
       }
       throw error;
     }
@@ -163,6 +171,7 @@ export class UsersService {
   }
 
   // MÉTODO CORRIGIDO: Listar com includes tipados - EXPANDIDO para consistência
+  // CORREÇÃO: Mesma estrutura de provider (select com includes aninhados) e string literal para status
   async findAllUsers(): Promise<UserWithIncludes[]> {
     this.logger.log(`[UsersService] findAllUsers: Listando todos os usuários com includes.`);
     try {
@@ -176,10 +185,23 @@ export class UsersService {
             include: { address: true },
             select: { id: true, fullName: true, phone: true, cpf: true, createdAt: true, updatedAt: true },
           },
-          provider: {
-            include: {
+          provider: {  // CORREÇÃO: Estrutura corrigida - select no nível superior
+            select: {
+              id: true,
+              fullName: true,
+              phone: true,
+              createdAt: true,
+              updatedAt: true,
+              cpf: true,
+              dateOfBirth: true,
+              yearsOfExperience: true,
+              avatarUrl: true,
+              verificationStatus: true,
+              bio: true,
+              badges: true,
+              acceptanceRate: true,
+              averageResponseTime: true,
               address: true,
-              user: true,
               providerServices: {
                 include: { service: true }
               },
@@ -191,28 +213,13 @@ export class UsersService {
                 }
               },
               bookings: {
-                where: { status: 'COMPLETED' },  // CORRIGIDO: String literal
-                orderBy: { createdAt: 'desc' },  // CORRIGIDO: String literal
+                where: { status: 'COMPLETED' },  // CORREÇÃO: String literal (evita erro de namespace)
+                orderBy: { createdAt: 'desc' },
                 take: 100,
               },
               availability: true
-            },
-            select: {
-              id: true,
-              fullName: true,
-              phone: true,
-              createdAt: true,
-              updatedAt: true,
-              cpf: true,
-              dateOfBirth: true,
-              yearsOfExperience: true,
-              avatarUrl: true,
-              verificationStatus: true,  // CORRIGIDO: 'true' em vez de VerificationStatus
-              bio: true,
-              badges: true,
-              acceptanceRate: true,
-              averageResponseTime: true,
-            },
+            }
+            // CORREÇÃO: Removido include.user (circular)
           },
           loyalty: true,
           referredBy: true, // CORRIGIDO
@@ -223,6 +230,10 @@ export class UsersService {
       return users;
     } catch (error) {
       this.logger.error(`[UsersService] findAllUsers: Erro na query: ${error.message}`);
+      // Fallback similar: Retorne array vazio ou mapeie basics se necessário
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        return [];
+      }
       throw error;
     }
   }
