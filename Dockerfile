@@ -1,42 +1,53 @@
-# Single-stage (simples p/ validar; depois, se quiser, volta para multi-stage)
-# Se der zica com Prisma no Node 22, troque para node:20-slim
+# Single-stage para simplicidade (testar primeiro; volte para multi se OK)
 FROM node:22-slim
 
-# deps de sistema para build (bcrypt, prisma, etc.) + healthcheck
+# Instala dependências do sistema (mais libs para build TS/Prisma)
 RUN apt-get update -y && apt-get install -y \
-    openssl ca-certificates dumb-init curl python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
+    openssl \
+    ca-certificates \
+    dumb-init \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
 
-# 1) instalar deps
+# Copia package files
 COPY package*.json ./
+
+# Instala deps (inclui dev para build)
 RUN npm ci --quiet
 
-# 2) copiar código + prisma e gerar client
+# Copia código
 COPY . .
+
+# Gera Prisma
 RUN npx prisma generate
 
-# 3) build (gera dist/src/main.js)
+# Build com verbose para logs detalhados
 RUN npm run build --verbose || (echo "ERRO CRÍTICO: Build falhou!" && exit 1)
 
-# 4) DEBUG: confirmar que o entrypoint existe em dist/src/main.js
-RUN echo "=== DEBUG: conteúdo de dist/ ===" && ls -la dist/ dist/src || true && \
-    if [ -f dist/src/main.js ]; then \
-      echo "OK: dist/src/main.js encontrado"; \
+# DEBUG: Verifica dist/ detalhadamente
+RUN echo "=== DEBUG BUILDER: Conteúdo de dist/ ===" && \
+    ls -la dist/ && \
+    if [ -f dist/main.js ]; then \
+      echo "main.js existe! Primeiras linhas:" && head -n 5 dist/main.js; \
     else \
-      echo "ERRO: dist/src/main.js NÃO encontrado!"; \
+      echo "ERRO: main.js NÃO ENCONTRADO!"; \
       exit 1; \
     fi
 
-# 5) otimizar imagem (remover devDeps)
-RUN npm prune --production --silent
+# Gera Prisma no runtime (para prod)
+RUN npx prisma generate
 
-ENV NODE_ENV=production PORT=8080
+# Porta
+ENV PORT=8080
 EXPOSE 8080
 
+# Healthcheck
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8080/health || exit 1
 
-# Start correto para seu layout atual
-CMD ["dumb-init", "node", "dist/src/main.js"]
+# Start
+CMD ["dumb-init", "node", "dist/main.js"]
