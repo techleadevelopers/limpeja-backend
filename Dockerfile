@@ -24,11 +24,13 @@ RUN npx prisma generate
 # Roda o build (compila src/ para dist/)
 RUN npm run build
 
+# DEBUG: Verifica se dist/main.js foi gerado (logs no Railway mostrarão)
+RUN ls -la dist/ || echo "ERRO: Pasta dist/ vazia ou não gerada!" && ls -la dist/main.js || echo "ERRO: main.js não encontrado em dist/"
+
 # Stage 2: Production (imagem leve, só runtime)
 FROM node:22-slim AS production
 
 # Instala dependências do sistema (openssl e ca-certificates para Prisma/PostGIS, dumb-init para signals)
-# Estrutura multi-linha limpa para evitar linting issues
 RUN apt-get update -y && \
     apt-get install -y \
         openssl \
@@ -44,22 +46,22 @@ RUN npm ci --only=production --quiet && npm cache clean --force
 
 # Copia o Prisma schema e gera client no runtime (garante compatibilidade com env/prod)
 COPY --from=builder /usr/src/app/prisma ./prisma
-RUN npx prisma generate  # Gera client com binaryTargets corretos para slim
+RUN npx prisma generate
 
 # Copia a app compilada (dist/) e o Prisma client gerado
 COPY --from=builder /usr/src/app/dist ./dist
 COPY --from=builder /usr/src/app/node_modules/.prisma/client ./node_modules/.prisma/client
 
-# NÃO setar DATABASE_URL aqui - passe via docker run ou docker-compose
-# ENV DATABASE_URL=${DATABASE_URL}  # REMOVIDO: Causa literal string se não passada
+# DEBUG: Verifica dist/ na production (logs mostrarão se cópia falhou)
+RUN ls -la dist/ || echo "ERRO: Pasta dist/ vazia na production!" && ls -la dist/main.js || echo "ERRO: main.js não encontrado na production!"
 
-# Porta da app (ajuste main.ts para usar process.env.PORT)
+# NÃO setar DATABASE_URL aqui - passe via Railway env vars
 ENV PORT=8080
 EXPOSE 8080
 
-# Healthcheck (opcional: verifica se app roda)
+# Healthcheck (verifica /health do app)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8080/health || exit 1
 
-# Start: Usa dumb-init para forward signals (ex.: SIGTERM no docker stop)
+# Start: Usa dumb-init; fallback para node se falhar
 CMD ["dumb-init", "node", "dist/main.js"]
