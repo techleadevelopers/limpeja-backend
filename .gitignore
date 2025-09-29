@@ -60,7 +60,3 @@ gcs-key.json
 semiotic-anvil-461613-c0-f6d2980cba2e.json
 limpeja-run-sa-key.json
 test/app.e2e-spec.ts
-
-
-.env
-.env.*
