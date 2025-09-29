@@ -12,6 +12,7 @@
     "dev": "nest start --watch",
     "debug": "nest start --debug --watch",
     "prod": "node dist/src/main.js",
+    "start:prod": "node dist/src/main.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -42,7 +43,6 @@
     "@sentry/nestjs": "^10.0.0",
     "@sentry/node": "^10.0.0",
     "@sentry/profiling-node": "^10.0.0",
-    "@types/twilio": "^3.19.2",
     "@types/uuid": "^10.0.0",
     "axios": "^1.7.2",
     "bcrypt": "^6.0.0",
@@ -59,7 +59,8 @@
     "rxjs": "^7.8.2",
     "socket.io": "^4.8.1",
     "twilio": "^5.8.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "@prisma/client": "^5.22.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
@@ -68,7 +69,6 @@
     "@nestjs/schematics": "^11.0.5",
     "@nestjs/swagger": "^11.2.0",
     "@nestjs/testing": "^11.1.2",
-    "@prisma/client": "^5.22.0",
     "@swc/cli": "^0.6.0",
     "@swc/core": "^1.11.29",
     "@types/bcrypt": "^5.0.2",
