@@ -9,12 +9,21 @@ import { CreateNotificationDto } from '../notifications/dto/create-notification.
 
 // Type alias para User com includes (baseado no schema.prisma) - EXPANDIDO para ProviderWithCalculatedRating compatibilidade
 // CORREÇÃO: Ajustado para usar strings literais no where de bookings (BookingStatus é um union type, não namespace)
+// CORREÇÃO: Para client, usar apenas 'select' com 'address: true' dentro dele (evita conflito include/select)
 // ADICIONADO: Campos como userId e pixKey no select do provider para compatibilidade com ProviderWithCalculatedRating e resolver TS2352 no DTO
 export type UserWithIncludes = Prisma.UserGetPayload<{
   include: {
     client: {
-      include: { address: true };
-      select: { id: true; fullName: true; phone: true; cpf: true; createdAt: true; updatedAt: true };
+      // CORREÇÃO: Removido 'include' e movido address para dentro de select (apenas select no nível da relação)
+      select: { 
+        id: true; 
+        fullName: true; 
+        phone: true; 
+        cpf: true; 
+        createdAt: true; 
+        updatedAt: true;
+        address: true;  // ADICIONADO: Inclui o full address dentro do select (sem sub-include/select para simplicidade)
+      };
     };
     provider: {
       select: {  // CORREÇÃO: 'select' no nível superior para Provider, com includes aninhados
@@ -36,7 +45,7 @@ export type UserWithIncludes = Prisma.UserGetPayload<{
         averageResponseTime: true;
         address: true;  // Inclui full Address
         providerServices: {
-          include: { service: true }  // Para services do provider
+          include: { service: true }  // Para services do provider (include aninhado é permitido sob select)
         };
         reviewsReceived: {
           include: {
@@ -76,9 +85,7 @@ export class UsersService {
         where: { id },
         include: {
           client: {
-            include: {
-              address: true,
-            },
+            // CORREÇÃO: Usar apenas 'select' com 'address: true' dentro (removido o include conflitante)
             select: { // Explícito para performance (evita campos pesados como bookings)
               id: true,
               fullName: true,
@@ -86,6 +93,7 @@ export class UsersService {
               cpf: true,
               createdAt: true,
               updatedAt: true,
+              address: true,  // CORREÇÃO: Movido para dentro do select (inclui full address)
             },
           },
           provider: {  // CORREÇÃO: Estrutura corrigida - select no nível superior com includes aninhados
@@ -178,6 +186,7 @@ export class UsersService {
 
   // MÉTODO CORRIGIDO: Listar com includes tipados - EXPANDIDO para consistência
   // CORREÇÃO: Mesma estrutura de provider (select com includes aninhados) e string literal para status
+  // CORREÇÃO: Para client, usar apenas 'select' com 'address: true' dentro
   // ADICIONADO: Campos userId e pixKey no select para consistência com findOne e DTO
   async findAllUsers(): Promise<UserWithIncludes[]> {
     this.logger.log(`[UsersService] findAllUsers: Listando todos os usuários com includes.`);
@@ -189,8 +198,16 @@ export class UsersService {
         },
         include: { // Mesmo include expandido de findOne para consistência
           client: {
-            include: { address: true },
-            select: { id: true, fullName: true, phone: true, cpf: true, createdAt: true, updatedAt: true },
+            // CORREÇÃO: Usar apenas 'select' com 'address: true' dentro (removido include conflitante)
+            select: { 
+              id: true, 
+              fullName: true, 
+              phone: true, 
+              cpf: true, 
+              createdAt: true, 
+              updatedAt: true,
+              address: true  // CORREÇÃO: Inclui full address dentro do select
+            },
           },
           provider: {  // CORREÇÃO: Estrutura corrigida - select no nível superior
             // ADICIONADO: userId e pixKey para resolver campos ausentes no DTO
