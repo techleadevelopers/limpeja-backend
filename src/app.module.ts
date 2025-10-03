@@ -119,6 +119,7 @@ import { BullModule } from '@nestjs/bull'; // Importar BullModule para configura
     RankingModule,
     MissionsModule,
     DisputeModule,
+    AdminModule,
     // NOVO: Inclusão dos novos módulos
     LocksModule,
     MetricsModule,
@@ -128,3 +129,4 @@ import { BullModule } from '@nestjs/bull'; // Importar BullModule para configura
   providers: [AppService],
 })
 export class AppModule {}
+
