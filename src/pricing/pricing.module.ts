@@ -4,12 +4,14 @@ import { PricingService } from './pricing.service';
 import { PricingController } from './pricing.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { GeocodingModule } from '../geocoding/geocoding.module';
+import { CacheModule } from '../cache/cache.module';
 import { BookingsModule } from '../bookings/bookings.module';
 
 @Module({
   imports: [
     PrismaModule,
     GeocodingModule,
+    CacheModule,
     forwardRef(() => BookingsModule),
   ],
   controllers: [PricingController],

@@ -24,6 +24,7 @@ export class QueuesService {
     'subscription-generation',
     'emails',
     'support-escalations',
+    'payouts',
   ] as const;
 
   constructor(
@@ -34,6 +35,7 @@ export class QueuesService {
     @InjectQueue('subscription-generation') private readonly subscriptionGenerationQueue: Queue,
     @InjectQueue('emails') private readonly emailsQueue: Queue, // NEW: Fila para e-mails
     @InjectQueue('support-escalations') private readonly supportEscalationsQueue: Queue, // Fila de escalonamento de suporte
+    @InjectQueue('payouts') private readonly payoutsQueue: Queue,
   ) {}
 
   /**

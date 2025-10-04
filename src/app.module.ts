@@ -30,6 +30,7 @@ import { SafetyModule } from './safety/safety.module';
 import { CouponsModule } from './coupons/coupons.module';
 import { GuaranteeModule } from './guarantee/guarantee.module';
 import { PricingModule } from './pricing/pricing.module';
+import { PayoutsModule } from './payouts/payouts.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
 
 // NOVO: Import do ConfigModule customizado (centraliza configuration e validationSchema)
