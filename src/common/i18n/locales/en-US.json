@@ -1,5 +1,8 @@
 ﻿{
     "translation":  {
+                        "profile": {
+                          "phone_invalid": "Invalid phone. Expected format (XX) XXXXX-XXXX."
+                        },
                         "common":  {
                                        "loading":  "Loading...",
                                        "error":  "Error",
@@ -19,7 +22,10 @@
                                        "generic_error":  "An unexpected error occurred. Please try again later.",
                                        "per_hour_short":  "/hr",
                                        "per_sqm_short":  "/sqm",
-                                       "info":  "Notice"
+                                       "per_room_short":  "/room",
+                                       "or":  "or",
+                                       "info":  "Notice",
+                                       "user":  "User"
                                    },
                         "explore_section":  {
                                                 "title":  "Explore"
@@ -44,6 +50,12 @@
                                        "coupon_applied_success":  "Coupon applied! You saved {{value}}.",
                                        "title":  "Offers"
                                    },
+                        "provider":  {
+                                         "no_description":  "No detailed description available."
+                                     },
+                        "reviews":  {
+                                        "none":  "No reviews yet"
+                                    },
                         "missions":  {
                                          "title":  "My Missions",
                                          "claim":  "Claim",
@@ -212,7 +224,7 @@
                                                },
                         "errors":  {
                                        "network":  {
-                                                       "retry_saved":  "We couldn\u0027t finish now. Your progress is safeâ€”try again shortly.",
+                                                       "retry_saved":  "We couldn\u0027t finish now. Your progress is saved; try again shortly.",
                                                        "contact_support":  "If this keeps happening, contact support."
                                                    },
                                        "cep":  {
@@ -259,8 +271,41 @@
                                                                      }
                                                      }
                                      },
+                        "filters":  {
+                                        "verified":  "Verified",
+                                        "fastResponse":  "Response \u003c 15 min",
+                                        "today":  "Today",
+                                        "tomorrow":  "Tomorrow",
+                                        "any":  "Any"
+                                    },
+                        "sort":  {
+                                     "best":  "Best",
+                                     "distance":  "Nearest",
+                                     "rating":  "Top rated",
+                                     "price":  "Lowest price"
+                                 },
+                        "pix":  {
+                                    "expiresIn":  "Expires in",
+                                    "copy":  "Copy code",
+                                    "copied":  "PIX code copied!",
+                                    "copy_error":  "Could not copy PIX code.",
+                                    "copy_unavailable":  "No PIX code available to copy.",
+                                    "copy_success_message":  "Paste it in your bank app to finish the payment.",
+                                    "regenerate":  "Generate new QR"
+                                },
+                        "overlay":  {
+                                        "pix":  {
+                                                    "regenerated":  "New QR generated",
+                                                    "regenerate_error":  "Could not generate a new QR."
+                                                }
+                                    },
                         "pricing":  {
-
+                                        "from":  "From",
+                                        "type":  {
+                                                     "fixed":  "Fixed price",
+                                                     "hour":  "Per hour",
+                                                     "sqm":  "Per m²"
+                                                 }
                                     }
                     }
 }
