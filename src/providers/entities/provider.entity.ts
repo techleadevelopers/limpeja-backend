@@ -53,7 +53,7 @@ export class ProviderEntity implements PrismaProvider {
   @ApiPropertyOptional({ description: 'Chave PIX do provedor', example: '123.456.789-00' })
   pixKey: string | null;
 
-  @ApiPropertyOptional({ description: 'Chave PIX mascarada para exibi��o', example: '123****-00' })
+  @ApiPropertyOptional({ description: 'Chave PIX mascarada para exibição', example: '123****-00' })
   pixKeyMasked: string | null;
 
   // ADICIONADO: ocrResult e livenessResult
