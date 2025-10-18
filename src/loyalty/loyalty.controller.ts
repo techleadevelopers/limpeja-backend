@@ -16,7 +16,7 @@ export class LoyaltyController {
   @Get('me')
   @ApiOperation({ summary: 'Obter o saldo de pontos do usuário logado' })
   async getMyPoints(@Req() req) {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     const points = await this.loyaltyService.getUserPoints(userId);
     return { userId, currentPoints: points };
   }
@@ -24,14 +24,14 @@ export class LoyaltyController {
   @Get('me/history')
   @ApiOperation({ summary: 'Obter o histórico de transações de pontos do usuário logado' })
   async getMyLoyaltyHistory(@Req() req) {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     return this.loyaltyService.getLoyaltyHistory(userId);
   }
 
   @Post('redeem')
   @ApiOperation({ summary: 'Resgatar pontos por uma recompensa' })
   async redeemPoints(@Req() req, @Body() redeemPointsDto: RedeemPointsDto) {
-    const userId = req.user.id;
+    const userId = req.user.userId;
     // CORREÇÃO: Passe userId como um argumento separado
     return this.loyaltyService.redeemPoints(userId, redeemPointsDto);
   }

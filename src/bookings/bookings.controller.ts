@@ -197,6 +197,19 @@ export class BookingsController {
     return new BookingDetailsDto(updatedBooking);
   }
 
+  // NOVA ROTA: Verificar se existe agendamento ativo entre cliente e provedor (para habilitar chat)
+  @Get('check-active-chat/:clientId/:providerId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verifica se há agendamento ativo entre cliente e provedor para permitir chat' })
+  @ApiResponse({ status: 200, description: 'Retorna se pode abrir chat e o bookingId, se existir.' })
+  async checkActiveChat(
+    @Param('clientId') clientId: string,
+    @Param('providerId') providerId: string,
+  ): Promise<{ canChat: boolean; bookingId?: string }> {
+    return this.bookingsService.checkActiveChatBooking(clientId, providerId);
+  }
+
   @Post(':id/report-issue')
   @Roles(UserRole.CLIENT, UserRole.PROVIDER)
   @UseGuards(JwtAuthGuard, RolesGuard)
