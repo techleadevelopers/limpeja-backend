@@ -23,6 +23,20 @@ export class BookingsController {
     private readonly i18n: I18nService, // Injetar I18nService
   ) {}
 
+  // ADMIN: Listar todos os agendamentos (com filtro opcional de status)
+  @Get()
+  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Listar todos os agendamentos (apenas admin)' })
+  @ApiResponse({ status: 200, description: 'Lista de agendamentos.', type: [BookingDetailsDto] })
+  async findAllBookings(@Req() req: Request, @Query('status') status?: BookingStatus): Promise<BookingDetailsDto[]> {
+    const userId = req.user['userId'];
+    const role = req.user['role'];
+    const bookings = await this.bookingsService.findUserBookings(userId, role, status as any, req);
+    return bookings.map(b => new BookingDetailsDto(b));
+  }
+
   @Post()
   @Roles(UserRole.CLIENT) // Apenas clientes podem criar agendamentos
   @UseGuards(JwtAuthGuard, RolesGuard)
