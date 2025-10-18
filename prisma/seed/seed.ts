@@ -1,4 +1,4 @@
-// seed.ts
+﻿// seed.ts
 import { PrismaClient, UserRole, Prisma, VerificationStatus, BookingStatus, TransactionType, PricingType, CouponType, CouponTarget, CouponStatus, MissionAudience, MissionKind, RewardType, MissionStatus, LoyaltyTransactionType, OfferTarget, OfferStatus, SupportTicketStatus, SupportTicketCategory, DisputeReason, DisputeStatus, IncidentType, IncidentStatus, SubscriptionFrequency, SubscriptionStatus, ClaimStatus, PaymentIntentStatus, PixKeyType, LedgerEntryType, PayoutStatus, Service, // Importado para tipagem de createdServices
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -37,6 +37,8 @@ async function upsertAddress(addressData: {
       city: addressData.city,
       state: addressData.state,
       neighborhood: addressData.neighborhood, // Adicionado para melhor unicidade
+      // Novo: considerar complement na unicidade quando fornecido, para evitar reuso entre provedores
+      complement: addressData.complement,
     },
   });
 
@@ -50,10 +52,162 @@ async function upsertAddress(addressData: {
   }
 }
 
-export async function main() { // <-- A mudança é aqui
+// Helper para gerar avaliações em massa para um provedor (sem alterar lógica principal)
+async function generateBulkReviews(providerUser: any, clientUser: any, residentialService: Service, numReviews: number = 100) {
+  console.log(`Gerando ${numReviews} avaliações em massa para ${providerUser.fullName}...`);
+  const ratingsCycle = [5, 4, 5, 4, 5, 3, 5, 4, 5, 5];
+  const commentsCycle = [
+    'Excelente serviço! Muito profissional e atenciosa.',
+    'Muito bom, recomendo para todos.',
+    'Satisfatório, bom trabalho.',
+    'Poderia melhorar um pouco, mas ok.',
+    'Perfeito! Deixou tudo impecável.',
+    'Rápida e eficiente.',
+    'Atendeu bem as expectativas.',
+    'Ótimo custo-benefício.',
+    'Serviço de qualidade.',
+    'Recomendo sem hesitar.'
+  ];
+
+  // Encontrar ou criar ProviderService para o serviço residencial (FIXED_PRICE, se existir; senão, qualquer)
+  let providerService = await prisma.providerService.findFirst({
+    where: {
+      providerId: providerUser.provider.id,
+      serviceId: residentialService.id,
+      pricingType: PricingType.FIXED_PRICE,
+    },
+  });
+  if (!providerService) {
+    // Fallback para qualquer pricingType se não encontrar FIXED_PRICE
+    providerService = await prisma.providerService.findFirst({
+      where: {
+        providerId: providerUser.provider.id,
+        serviceId: residentialService.id,
+      },
+    });
+  }
+  if (!providerService) {
+    console.warn(`ProviderService não encontrado para ${providerUser.fullName}. Pulando geração de reviews.`);
+    return;
+  }
+
+  let createdCount = 0;
+  for (let i = 1; i <= numReviews; i++) {
+    const pastDate = addDays(new Date(), - (i * 3 + Math.floor(Math.random() * 30))); // Datas passadas espaçadas e variadas
+    const bookingId = `BKG-BULK-${providerUser.fullName.replace(' ', '').toUpperCase()}-${i.toString().padStart(3, '0')}`;
+    const cep = `010${(i % 100).toString().padStart(2, '0')}-00${(i % 10)}`;
+    const street = `Rua Avaliação Fake ${i}`;
+    const number = `${(i * 10) % 1000}`;
+    const uniqueAddressData = {
+      cep,
+      street,
+      number,
+      neighborhood: `Bairro Fake ${i % 5}`,
+      city: 'São Paulo',
+      state: 'SP',
+      latitude: -23.55 + (i * 0.0001),
+      longitude: -46.63 + (i * 0.0001),
+      complement: bookingId,
+    };
+    const address = await upsertAddress(uniqueAddressData);
+
+    const booking = await prisma.booking.upsert({
+      where: { id: bookingId },
+      update: {
+        clientId: clientUser.client.id,
+        providerId: providerUser.provider.id,
+        providerServiceId: providerService.id,
+        scheduledDate: pastDate,
+        scheduledTime: ['09:00', '10:00', '14:00', '16:00'][Math.floor(Math.random() * 4)],
+        status: BookingStatus.COMPLETED,
+        totalPrice: new Prisma.Decimal((150 + Math.floor(Math.random() * 100)).toFixed(2)), // Variação de preço
+        addressId: address.id,
+        notes: `Avaliação em massa ${i} para ${providerUser.fullName}.`,
+      },
+      create: {
+        id: bookingId,
+        clientId: clientUser.client.id,
+        providerId: providerUser.provider.id,
+        providerServiceId: providerService.id,
+        scheduledDate: pastDate,
+        scheduledTime: ['09:00', '10:00', '14:00', '16:00'][Math.floor(Math.random() * 4)],
+        status: BookingStatus.COMPLETED,
+        totalPrice: new Prisma.Decimal((150 + Math.floor(Math.random() * 100)).toFixed(2)),
+        notes: `Avaliação em massa ${i} para ${providerUser.fullName}.`,
+        addressId: address.id,
+      },
+    });
+
+    // PaymentIntent (PAID)
+    await prisma.paymentIntent.upsert({
+      where: { bookingId: booking.id },
+      update: {
+        status: PaymentIntentStatus.PAID,
+        amountCents: booking.totalPrice.mul(100).toNumber(),
+      },
+      create: {
+        bookingId: booking.id,
+        status: PaymentIntentStatus.PAID,
+        amountCents: booking.totalPrice.mul(100).toNumber(),
+        gateway: 'PIX_SIMULADO_BULK',
+        externalRef: `PIX-BULK-${bookingId}`,
+        idempotencyKey: `IDEMPOTENCY-BULK-${bookingId}`,
+        createdAt: pastDate,
+      },
+    });
+
+    // Transaction (COMPLETED)
+    await prisma.transaction.upsert({
+      where: { gatewayTransactionId: `TRANS-BULK-${bookingId}` },
+      update: {
+        providerId: booking.providerId,
+        amount: booking.totalPrice,
+        type: TransactionType.PAYMENT,
+        status: 'COMPLETED',
+        description: `Pagamento bulk para ${bookingId}`,
+        bookingId: booking.id,
+      },
+      create: {
+        providerId: booking.providerId,
+        amount: booking.totalPrice,
+        type: TransactionType.PAYMENT,
+        status: 'COMPLETED',
+        description: `Pagamento bulk para ${bookingId}`,
+        bookingId: booking.id,
+        gatewayTransactionId: `TRANS-BULK-${bookingId}`,
+        createdAt: pastDate,
+      },
+    });
+
+    // Review
+    const rating = ratingsCycle[i % ratingsCycle.length];
+    const comment = commentsCycle[Math.floor(i % commentsCycle.length)];
+    await prisma.review.upsert({
+      where: { bookingId: booking.id },
+      update: {
+        rating,
+        comment: `${comment} (Bulk ${i})`,
+        clientId: clientUser.client.id,
+        providerId: providerUser.provider.id,
+      },
+      create: {
+        bookingId: booking.id,
+        clientId: clientUser.client.id,
+        providerId: providerUser.provider.id,
+        rating,
+        comment: `${comment} (Bulk ${i})`,
+      },
+    });
+
+    createdCount++;
+  }
+  console.log(`✅ ${createdCount} avaliações geradas para ${providerUser.fullName}.`);
+}
+
+export async function main() {
   console.log('Iniciando o processo de seed...');
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // Guard-rail
   if (process.env.NODE_ENV === 'production') {
     console.log('Seed bloqueado em produção. Abortando.');
@@ -63,7 +217,7 @@ export async function main() { // <-- A mudança é aqui
   const pwd = await bcrypt.hash('12345678', 10);
   const now = new Date();
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // 1) USUÁRIOS E PERFIS (ADMIN, CLIENTES, PROVEDORES)
   console.log('Criando/Atualizando usuários e perfis...');
 
@@ -77,7 +231,7 @@ export async function main() { // <-- A mudança é aqui
       fullName: 'Admin LimpeJá',
     },
   });
-  console.log(`Usuário Admin '${adminUser.email}' criada/atualizada.`);
+  console.log(`Usuário Admin '${adminUser.email}' criado/atualizado.`);
 
   const referrerAddress = await upsertAddress({
     cep: '01000000',
@@ -108,7 +262,7 @@ export async function main() { // <-- A mudança é aqui
     },
     include: { client: true },
   });
-  console.log(`Usuário Cliente 'Indicador' (${referrerUser.email}) criada/atualizada.`);
+  console.log(`Usuário Cliente 'Indicador' (${referrerUser.email}) criado/atualizado.`);
 
   const referredAddress = await upsertAddress({
     cep: '01001001',
@@ -139,9 +293,9 @@ export async function main() { // <-- A mudança é aqui
     },
     include: { client: true },
   });
-  console.log(`Usuário Cliente 'Indicado' (${referredUser.email}) criada/atualizada.`);
+  console.log(`Usuário Cliente 'Indicado' (${referredUser.email}) criado/atualizado.`);
 
-  // Existing Provider: Caroline Silva
+  // Existing Provider: Caroline Silva (LINK CORRIGIDO)
   const providerAddress = await upsertAddress({
     cep: '01002-002',
     street: 'Av. do Provedor',
@@ -161,7 +315,8 @@ export async function main() { // <-- A mudança é aqui
       fullName: 'Caroline Silva',
       provider: {
         update: {
-          pixKeyMasked: 'caro****@email.com', // ADICIONADO: Máscara para PIX (exemplo simples; aplicar lógica real na app)
+          pixKeyMasked: 'caro****@email.com',
+          avatarUrl: 'https://randomuser.me/api/portraits/women/6.jpg',
         }
       }
     },
@@ -175,42 +330,42 @@ export async function main() { // <-- A mudança é aqui
           fullName: 'Caroline Silva',
           yearsOfExperience: 5,
           verificationStatus: VerificationStatus.APPROVED,
-          acceptanceRate: 0.92,
-          averageResponseTime: 180, // Em minutos, conforme schema.prisma
+          acceptanceRate: 94,
+          averageResponseTime: 25, // Em minutos, conforme schema.prisma
           bio: 'Provedora experiente e dedicada a um serviço de qualidade.',
           pixKey: 'carolina.pix@email.com',
-          pixKeyMasked: 'caro****@email.com', // ADICIONADO: Máscara para PIX (exemplo simples; aplicar lógica real na app)
+          pixKeyMasked: 'caro****@email.com',
           address: { connect: { id: providerAddress.id } },
           dateOfBirth: new Date('1985-01-15'),
           cpf: '000.000.000-00',
           phone: '11977777777',
-          avatarUrl: 'https://randomuser.me/api/portraits/women/6.jpg', // Placeholder image
+          avatarUrl: 'https://randomuser.me/api/portraits/women/6.jpg',
         },
       },
     },
     include: { provider: true },
   });
-  console.log(`Usuário Provedor 'Caroline Silva' (${providerUser.email}) criada/atualizada.`);
+  console.log(`Usuário Provedor 'Caroline Silva' (${providerUser.email}) criado/atualizado.`);
 
   // Initial balance injection for the main provider (Caroline Silva) for withdrawal testing
   if (providerUser.provider) {
     const initialBalanceTransactionRef = 'INITIAL_BALANCE_INJECTION_CAROLINE';
     const initialTransaction = await prisma.transaction.upsert({
-      where: { gatewayTransactionId: initialBalanceTransactionRef }, // CORREÇÃO AQUI: Usando gatewayTransactionId
+      where: { gatewayTransactionId: initialBalanceTransactionRef },
       update: {
         amount: new Prisma.Decimal(200.00),
         status: 'COMPLETED',
         description: 'Saldo inicial injetado para teste de saque',
-        gatewayTransactionId: initialBalanceTransactionRef, // Garantindo que seja atualizado
+        gatewayTransactionId: initialBalanceTransactionRef,
       },
       create: {
         providerId: providerUser.provider.id,
         amount: new Prisma.Decimal(200.00),
-        type: TransactionType.PAYMENT, // Representing funds coming into the provider's balance
+        type: TransactionType.PAYMENT,
         status: 'COMPLETED',
         description: 'Saldo inicial injetado para teste de saque',
-        transactionRef: initialBalanceTransactionRef, // Mantendo transactionRef para referência customizada
-        gatewayTransactionId: initialBalanceTransactionRef, // CORREÇÃO AQUI: Adicionando gatewayTransactionId
+        transactionRef: initialBalanceTransactionRef,
+        gatewayTransactionId: initialBalanceTransactionRef,
         createdAt: new Date(),
       },
     });
@@ -219,7 +374,7 @@ export async function main() { // <-- A mudança é aqui
     console.warn(`Provider profile not found for ${providerUser.fullName}. Cannot inject initial balance.`);
   }
 
-  // NEW PROVIDER 1: Maria
+  // NEW PROVIDER 1: Maria (LINK CORRIGIDO)
   const providerAddress2 = await upsertAddress({
     cep: '01002-003',
     street: 'Rua das Flores',
@@ -239,7 +394,8 @@ export async function main() { // <-- A mudança é aqui
       fullName: 'Maria',
       provider: {
         update: {
-          pixKeyMasked: 'mari****@email.com', // ADICIONADO: Máscara para PIX (exemplo simples; aplicar lógica real na app)
+          pixKeyMasked: 'mari****@email.com',
+          avatarUrl: 'https://randomuser.me/api/portraits/women/7.jpg',
         }
       }
     },
@@ -253,24 +409,24 @@ export async function main() { // <-- A mudança é aqui
           fullName: 'Maria',
           yearsOfExperience: 3,
           verificationStatus: VerificationStatus.APPROVED,
-          acceptanceRate: 0.85,
-          averageResponseTime: 240,
+          acceptanceRate: 94,
+          averageResponseTime: 25,
           bio: 'Limpeza eficiente e com carinho, cuidando do seu lar como se fosse meu.',
           pixKey: 'maria.pix@email.com',
-          pixKeyMasked: 'mari****@email.com', // ADICIONADO: Máscara para PIX (exemplo simples; aplicar lógica real na app)
+          pixKeyMasked: 'mari****@email.com',
           address: { connect: { id: providerAddress2.id } },
           dateOfBirth: new Date('1990-03-20'),
           cpf: '111.111.111-11',
           phone: '11966666666',
-          avatarUrl: 'https://randomuser.me/api/portraits/women/7.jpg', // Placeholder image
+          avatarUrl: 'https://randomuser.me/api/portraits/women/7.jpg',
         },
       },
     },
     include: { provider: true },
   });
-  console.log(`Usuário Provedor 'Maria' (${providerUser2.email}) criada/atualizada.`);
+  console.log(`Usuário Provedor 'Maria' (${providerUser2.email}) criado/atualizado.`);
 
-  // NEW PROVIDER 2: Joana
+  // NEW PROVIDER 2: Joana (LINK CORRIGIDO DO CACHORRO)
   const providerAddress3 = await upsertAddress({
     cep: '01002-004',
     street: 'Av. Paulista',
@@ -290,7 +446,8 @@ export async function main() { // <-- A mudança é aqui
       fullName: 'Joana',
       provider: {
         update: {
-          pixKeyMasked: 'joan****@email.com', // ADICIONADO: Máscara para PIX (exemplo simples; aplicar lógica real na app)
+          pixKeyMasked: 'joan****@email.com',
+          avatarUrl: 'https://randomuser.me/api/portraits/women/8.jpg',
         }
       }
     },
@@ -304,24 +461,24 @@ export async function main() { // <-- A mudança é aqui
           fullName: 'Joana',
           yearsOfExperience: 7,
           verificationStatus: VerificationStatus.APPROVED,
-          acceptanceRate: 0.95,
-          averageResponseTime: 120,
+          acceptanceRate: 94,
+          averageResponseTime: 25,
           bio: 'Especialista em limpeza profunda e organização de ambientes.',
           pixKey: 'joana.pix@email.com',
-          pixKeyMasked: 'joan****@email.com', // ADICIONADO: Máscara para PIX (exemplo simples; aplicar lógica real na app)
+          pixKeyMasked: 'joan****@email.com',
           address: { connect: { id: providerAddress3.id } },
           dateOfBirth: new Date('1980-07-01'),
           cpf: '222.222.222-22',
           phone: '11955555555',
-          avatarUrl: 'https://randomuser.me/api/portraits/women/8.jpg', // Placeholder image
+          avatarUrl: 'https://randomuser.me/api/portraits/women/8.jpg',
         },
       },
     },
     include: { provider: true },
   });
-  console.log(`Usuário Provedor 'Joana' (${providerUser3.email}) criada/atualizada.`);
+  console.log(`Usuário Provedor 'Joana' (${providerUser3.email}) criado/atualizado.`);
 
-  // NEW PROVIDER 3: Ana
+  // NEW PROVIDER 3: Ana (LINK CORRIGIDO DO CÉREBRO)
   const providerAddress4 = await upsertAddress({
     cep: '01002-005',
     street: 'Rua Augusta',
@@ -341,7 +498,8 @@ export async function main() { // <-- A mudança é aqui
       fullName: 'Ana',
       provider: {
         update: {
-          pixKeyMasked: 'ana.****@email.com', // ADICIONADO: Máscara para PIX (exemplo simples; aplicar lógica real na app)
+          pixKeyMasked: 'ana.****@email.com',
+          avatarUrl: 'https://randomuser.me/api/portraits/women/9.jpg',
         }
       }
     },
@@ -355,22 +513,22 @@ export async function main() { // <-- A mudança é aqui
           fullName: 'Ana',
           yearsOfExperience: 2,
           verificationStatus: VerificationStatus.APPROVED,
-          acceptanceRate: 0.88,
-          averageResponseTime: 200,
+          acceptanceRate: 94,
+          averageResponseTime: 25,
           bio: 'Dedicação e cuidado em cada detalhe para um ambiente impecável.',
           pixKey: 'ana.pix@email.com',
-          pixKeyMasked: 'ana.****@email.com', // ADICIONADO: Máscara para PIX (exemplo simples; aplicar lógica real na app)
+          pixKeyMasked: 'ana.****@email.com',
           address: { connect: { id: providerAddress4.id } },
           dateOfBirth: new Date('1995-11-11'),
           cpf: '333.333.333-33',
           phone: '11944444444',
-          avatarUrl: 'https://randomuser.me/api/portraits/women/9.jpg', // Placeholder image
+          avatarUrl: 'https://randomuser.me/api/portraits/women/9.jpg',
         },
       },
     },
     include: { provider: true },
   });
-  console.log(`Usuário Provedor 'Ana' (${providerUser4.email}) criada/atualizada.`);
+  console.log(`Usuário Provedor 'Ana' (${providerUser4.email}) criado/atualizado.`);
 
   // NOVO CLIENTE PARA AVALIAR A JOANA
   const clientJoanaReviewerAddress = await upsertAddress({
@@ -402,13 +560,106 @@ export async function main() { // <-- A mudança é aqui
     },
     include: { client: true },
   });
-  console.log(`Usuário Cliente 'Cliente Joana Reviewer' (${clientUserJoanaReviewer.email}) criada/atualizada.`);
+  console.log(`Usuário Cliente 'Cliente Joana Reviewer' (${clientUserJoanaReviewer.email}) criado/atualizado.`);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // Adicional: Clientes reviewers para outros provedores (para geração de bulk reviews)
+  const clientCarolineReviewerAddress = await upsertAddress({
+    cep: '01001003',
+    street: 'Rua Caroline Reviewer',
+    number: '60',
+    neighborhood: 'Centro',
+    city: 'São Paulo',
+    state: 'SP',
+    latitude: -23.541,
+    longitude: -46.621,
+  });
+
+  const clientUserCarolineReviewer = await prisma.user.upsert({
+    where: { email: 'clientcaroline@teste.com' },
+    update: { passwordHash: pwd, role: UserRole.CLIENT, fullName: 'Cliente Caroline Reviewer' },
+    create: {
+      email: 'clientcaroline@teste.com',
+      passwordHash: pwd,
+      role: UserRole.CLIENT,
+      fullName: 'Cliente Caroline Reviewer',
+      client: {
+        create: {
+          fullName: 'Cliente Caroline Reviewer',
+          phone: '11922222222',
+          address: { connect: { id: clientCarolineReviewerAddress.id } },
+        },
+      },
+    },
+    include: { client: true },
+  });
+  console.log(`Usuário Cliente 'Cliente Caroline Reviewer' criado/atualizado.`);
+
+  const clientMariaReviewerAddress = await upsertAddress({
+    cep: '01001004',
+    street: 'Rua Maria Reviewer',
+    number: '70',
+    neighborhood: 'Centro',
+    city: 'São Paulo',
+    state: 'SP',
+    latitude: -23.542,
+    longitude: -46.622,
+  });
+
+  const clientUserMariaReviewer = await prisma.user.upsert({
+    where: { email: 'clientmaria@teste.com' },
+    update: { passwordHash: pwd, role: UserRole.CLIENT, fullName: 'Cliente Maria Reviewer' },
+    create: {
+      email: 'clientmaria@teste.com',
+      passwordHash: pwd,
+      role: UserRole.CLIENT,
+      fullName: 'Cliente Maria Reviewer',
+      client: {
+        create: {
+          fullName: 'Cliente Maria Reviewer',
+          phone: '11911111111',
+          address: { connect: { id: clientMariaReviewerAddress.id } },
+        },
+      },
+    },
+    include: { client: true },
+  });
+  console.log(`Usuário Cliente 'Cliente Maria Reviewer' criado/atualizado.`);
+
+  const clientAnaReviewerAddress = await upsertAddress({
+    cep: '01001005',
+    street: 'Rua Ana Reviewer',
+    number: '80',
+    neighborhood: 'Centro',
+    city: 'São Paulo',
+    state: 'SP',
+    latitude: -23.543,
+    longitude: -46.623,
+  });
+
+  const clientUserAnaReviewer = await prisma.user.upsert({
+    where: { email: 'clientana@teste.com' },
+    update: { passwordHash: pwd, role: UserRole.CLIENT, fullName: 'Cliente Ana Reviewer' },
+    create: {
+      email: 'clientana@teste.com',
+      passwordHash: pwd,
+      role: UserRole.CLIENT,
+      fullName: 'Cliente Ana Reviewer',
+      client: {
+        create: {
+          fullName: 'Cliente Ana Reviewer',
+          phone: '11900000000',
+          address: { connect: { id: clientAnaReviewerAddress.id } },
+        },
+      },
+    },
+    include: { client: true },
+  });
+  console.log(`Usuário Cliente 'Cliente Ana Reviewer' criado/atualizado.`);
+
+  // -----------------------------------------------------------------------------
   // 2) REFERRAL CODE (para o indicador)
   console.log('Criando/Atualizando código de indicação...');
 
-  // Onde 'referredUserId' é o campo único no modelo Referral
   const referralCode = await prisma.referral.upsert({
     where: { referredUserId: referredUser.id },
     update: { referrerUserId: referrerUser.id, referralCode: 'REF-TEST-001' },
@@ -419,10 +670,10 @@ export async function main() { // <-- A mudança é aqui
     },
   });
   console.log(
-    `Código de Indicação 'REF-TEST-001' para ${referrerUser.fullName} (indicando ${referredUser.fullName}) criada/atualizada.`,
+    `Código de Indicação 'REF-TEST-001' para ${referrerUser.fullName} (indicando ${referredUser.fullName}) criado/atualizado.`,
   );
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // 3) CATÁLOGO DE SERVIÇOS
   console.log('Criando/Atualizando serviços...');
 
@@ -726,7 +977,7 @@ export async function main() { // <-- A mudança é aqui
   }
   console.log(`Disponibilidade para ${providerUser.fullName} criada/atualizada.`);
 
-  // Adicionando mais dias para Carolina (Joana é providerUser3, mas Carolina é providerUser)
+  // Adicionando mais dias para Carolina
   const additionalWeekdaysForCaroline = [2, 4, 6, 7]; // Terça, Quinta, Sábado, Domingo
   for (const wd of additionalWeekdaysForCaroline) {
     const existingAvailability = await prisma.availability.findFirst({
@@ -891,7 +1142,7 @@ export async function main() { // <-- A mudança é aqui
   }
   console.log(`Disponibilidade para ${providerUser4.fullName} criada/atualizada.`);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // 4) CUPONS
   console.log('Criando/Atualizando cupons...');
 
@@ -999,7 +1250,7 @@ export async function main() { // <-- A mudança é aqui
   });
   console.log(`Cupom 'MISSAO10' criado/atualizado.`);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // 5) MISSÕES
   console.log('Criando/Atualizando missões...');
 
@@ -1196,7 +1447,7 @@ export async function main() { // <-- A mudança é aqui
   const missionProviderHighRating = await prisma.mission.upsert({
     where: { code: 'PROVIDER_RATING_48PLUS_10' },
     update: {
-      title: 'Receba 10 avaliações ≥ 4.8 no mês',
+      title: 'Receba 10 avaliações = 4.8 no mês',
       audience: MissionAudience.PROVIDER,
       kind: MissionKind.COUNT_EVENT,
       targetValue: 10,
@@ -1208,8 +1459,8 @@ export async function main() { // <-- A mudança é aqui
     },
     create: {
       code: 'PROVIDER_RATING_48PLUS_10',
-      title: 'Receba 10 avaliações ≥ 4.8 no mês',
-      description: 'Receba 10 avaliações com nota ≥ 4.8 em 30 dias (evento emitido no review).',
+      title: 'Receba 10 avaliações = 4.8 no mês',
+      description: 'Receba 10 avaliações com nota = 4.8 em 30 dias (evento emitido no review).',
       audience: MissionAudience.PROVIDER,
       kind: MissionKind.COUNT_EVENT,
       eventName: 'provider.review.4_8plus',
@@ -1224,7 +1475,7 @@ export async function main() { // <-- A mudança é aqui
   });
   console.log(`Missão 'PROVIDER_RATING_48PLUS_10' criada/atualizada.`);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // 6) BOOKINGS E PAGAMENTOS
   console.log('Criando/Atualizando agendamentos e transações...');
 
@@ -1417,6 +1668,47 @@ export async function main() { // <-- A mudança é aqui
   });
   console.log(`Agendamento Confirmado 'BKG-SEED-3' criado/atualizado.`);
 
+  // Booking PENDING (aguardando confirmacao)
+  const pendingBookingDate = addDays(now, 3);
+  // Importante: Booking.addressId é @unique, então cada booking precisa de um Address próprio
+  const pendingAddress = await upsertAddress({
+    cep: '01002-003',
+    street: 'Av. do Provedor',
+    number: '301', // diferente de outros para garantir novo Address
+    neighborhood: 'Jardins',
+    city: 'São Paulo',
+    state: 'SP',
+    latitude: -23.57,
+    longitude: -46.65,
+  });
+  const pendingBooking = await prisma.booking.upsert({
+    where: { id: 'BKG-SEED-PENDING-1' },
+    update: {
+      clientId: referrerUser.client.id,
+      providerId: providerUser.provider.id,
+      providerServiceId: providerServiceForBooking3.id,
+      scheduledDate: pendingBookingDate,
+      scheduledTime: '16:00',
+      status: BookingStatus.PENDING,
+      totalPrice: new Prisma.Decimal(150.00),
+      addressId: pendingAddress.id,
+      notes: 'Solicitação pendente para teste do dashboard.',
+    },
+    create: {
+      id: 'BKG-SEED-PENDING-1',
+      clientId: referrerUser.client.id,
+      providerId: providerUser.provider.id,
+      providerServiceId: providerServiceForBooking3.id,
+      scheduledDate: pendingBookingDate,
+      scheduledTime: '16:00',
+      status: BookingStatus.PENDING,
+      totalPrice: new Prisma.Decimal(150.00),
+      notes: 'Solicitação pendente para teste do dashboard.',
+      addressId: pendingAddress.id,
+    },
+  });
+  console.log(`Agendamento Pendente 'BKG-SEED-PENDING-1' criado/atualizado.`);
+
   // NOVO: Agendamentos Concluídos para Joana
   const joanaService = await prisma.providerService.findFirst({
     where: {
@@ -1488,7 +1780,7 @@ export async function main() { // <-- A mudança é aqui
   console.log(`Agendamento Concluído 'BKG-SEED-JOANA-2' (para Joana) criado/atualizado.`);
 
   // Pagamentos confirmados dos agendamentos concluídos
-  for (const booking of [booking1, booking2, bookingJoana1, bookingJoana2]) { // Adicionado bookings da Joana aqui
+  for (const booking of [booking1, booking2, bookingJoana1, bookingJoana2]) {
     await prisma.paymentIntent.upsert({
       where: { bookingId: booking.id },
       update: {
@@ -1533,9 +1825,9 @@ export async function main() { // <-- A mudança é aqui
     console.log(`Transação para Booking ${booking.id} criado/atualizado.`);
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // NOVO BLOCO: FLUXO INICIAR/FINALIZAR SERVIÇO
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   
   async function seedProviderLiveFlow() {
     console.log('Criando fluxo de bookings LIVE para testar iniciar/finalizar serviço...');
@@ -1562,6 +1854,17 @@ export async function main() { // <-- A mudança é aqui
       latitude: -23.584,
       longitude: -46.664,
     });
+    const bookingAddressLive3 = await upsertAddress({
+      cep: '01003-010',
+      street: 'Rua LIVE 3',
+      number: '502',
+      neighborhood: 'Bairro LIVE',
+      city: 'São Paulo',
+      state: 'SP',
+      latitude: -23.585,
+      longitude: -46.665,
+    });
+
 
     // Booking CONFIRMED para hoje (libera botão "Iniciar")
     const liveBooking = await prisma.booking.upsert({
@@ -1618,7 +1921,7 @@ export async function main() { // <-- A mudança é aqui
         status: BookingStatus.COMPLETED,
         scheduledDate: addDays(now, -2), // Garantir consistência na data
         scheduledTime: '11:00', // Garantir consistência no horário
-        addressId: bookingAddress1.id, // Mantém o endereço original (único)
+        addressId: bookingAddressLive3.id, // Mantém o endereço original (único)
       },
       create: {
         id: 'BKG-LIVE-3',
@@ -1629,13 +1932,13 @@ export async function main() { // <-- A mudança é aqui
         scheduledTime: '11:00',
         status: BookingStatus.COMPLETED,
         totalPrice: new Prisma.Decimal(240),
-        addressId: bookingAddress1.id,
+        addressId: bookingAddressLive3.id,
         notes: 'Serviço finalizado para teste de histórico.',
       },
     });
     console.log(`Booking LIVE COMPLETED 'BKG-LIVE-3' criado/atualizado.`);
 
-    // ──── PAGAMENTOS E LEDGER ────
+    // ---- PAGAMENTOS E LEDGER ----
 
     // PaymentIntent PENDING para o booking em andamento (BKG-LIVE-2)
     await prisma.paymentIntent.upsert({
@@ -1725,7 +2028,7 @@ export async function main() { // <-- A mudança é aqui
     });
     console.log(`Ledger EARNING para Booking ${finished.id} criado/atualizado.`);
 
-    // ──── NOTIFICAÇÕES PARA PROVIDER ──── (CORRIGIDO: Usar upsert com ID fixo para idempotência)
+    // ---- NOTIFICAÇÕES PARA PROVIDER ---- (CORRIGIDO: Usar upsert com ID fixo para idempotência)
 
     // Notificação de serviço iniciado (para BKG-LIVE-2)
     await prisma.notification.upsert({
@@ -1808,13 +2111,13 @@ export async function main() { // <-- A mudança é aqui
     });
     console.log(`Notificação de lembrete (BKG-LIVE-1) criada.`);
 
-    console.log('Fluxo LIVE de bookings criado com sucesso! ✅');
+    console.log('Fluxo LIVE de bookings criado com sucesso! ?');
   }
 
   // Executar o novo fluxo após os bookings existentes
   await seedProviderLiveFlow();
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // 7) PROGRESSO DE MISSÕES
   console.log('Criando/Atualizando progresso de missões...');
 
@@ -1831,7 +2134,7 @@ export async function main() { // <-- A mudança é aqui
   });
   console.log(`Progresso de missão para ${referrerUser.fullName} (1/3) criado/atualizado.`);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // 8) FIDELIDADE (Loyalty e LoyaltyTransaction)
   console.log('Criando/Atualizando pontos de fidelidade...');
 
@@ -1855,7 +2158,7 @@ export async function main() { // <-- A mudança é aqui
   });
   console.log(`Transação de pontos para ${referrerUser.fullName} (serviço concluído) criada/atualizada.`);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // 9) NOTIFICAÇÕES
   console.log('Criando/Atualizando notificações...');
 
@@ -1887,7 +2190,7 @@ export async function main() { // <-- A mudança é aqui
   });
   console.log(`Notificação de retorno para ${referrerUser.fullName} criada/atualizada.`);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
   // 10) AVALIAÇÕES (REVIEWS)
   console.log('Criando/Atualizando avaliações...');
 
@@ -1946,7 +2249,17 @@ export async function main() { // <-- A mudança é aqui
   });
   console.log(`Avaliação para Booking ${bookingJoana2.id} (Joana) criada/atualizada.`);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // -----------------------------------------------------------------------------
+  // GERAÇÃO EM MASSA DE 100 AVALIAÇÕES POR PRESTADOR (usando o serviço residencial e reviewers dedicados)
+  // -----------------------------------------------------------------------------
+  console.log('Gerando avaliações em massa para prestadores...');
+  // Quantidades variadas por provedor para simular escala real (mantendo o restante igual)
+  await generateBulkReviews(providerUser,  clientUserCarolineReviewer, residentialCleaningService, 23);
+  await generateBulkReviews(providerUser2, clientUserMariaReviewer,     residentialCleaningService, 15);
+  await generateBulkReviews(providerUser3, clientUserJoanaReviewer,     residentialCleaningService, 19);
+  await generateBulkReviews(providerUser4, clientUserAnaReviewer,       residentialCleaningService, 11);
+
+  // -----------------------------------------------------------------------------
   // 11) OUTROS MODELOS (Exemplos básicos)
 
   // FAQItem
@@ -2058,7 +2371,7 @@ export async function main() { // <-- A mudança é aqui
       bookingId: booking3.id,
     },
   });
-  console.log(`Ticket de suporte 'TICKET-001' criado/atualizada.`);
+  console.log(`Ticket de suporte 'TICKET-001' criado/atualizado.`);
 
   // SupportMessage
   console.log('Criando/Atualizando mensagem de suporte...');
@@ -2269,7 +2582,7 @@ export async function main() { // <-- A mudança é aqui
   }
   console.log(`Solicitação de Garantia para Booking ${booking2.id} criada/atualizada.`);
 
-  console.log('Seed completo com fluxo LIVE ✅');
+  console.log('Seed completo com fluxo LIVE e avaliações em massa! ✅');
 }
 
 main()
