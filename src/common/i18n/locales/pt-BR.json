@@ -1,4 +1,4 @@
-﻿{
+﻿﻿{
   "translation": {
     "profile": {
       "phone_invalid": "Telefone inválido. Formato esperado (XX) XXXXX-XXXX."
@@ -38,8 +38,9 @@
       "afternoon": "Tarde",
       "evening": "Noite",
       "or": "ou",
-      "user": "Usuário"
-    },
+      "user": "Usuário",
+  "view_all": "Ver todos"
+},
     "explore_section": {
       "title": "Explore mais Serviços"
     },
@@ -82,13 +83,20 @@
       "category_frequency": "Frequência",
       "category_diversity": "Diversidade"
     },
-    "metrics": {
-      "acceptance_rate": "Aceitação",
-      "avg_response_time": "Resposta",
-      "minutes_short": "min",
-      "acceptance_short": "Aceitação",
-      "response_short": "Resposta"
-    },
+      "metrics": {
+    "title": "Minhas Métricas",
+    "summary_title": "Resumo",
+    "bookings_label": "Agendamentos",
+    "spent_label": "Total gasto",
+    "missions_completed_label": "Missões concluídas",
+    "coupons_active_label": "Cupons ativos",
+    "chart_title": "Agendamentos por mês",
+    "recent_bookings_title": "Últimos agendamentos",
+    "points_section_title": "Pontos recentes",
+    "missions_section_title": "Suas missões",
+    "coupons_title": "Seus cupons",
+    "view_all": "Ver todos"
+  },
     "safety": {
       "panic": {
         "activate": "ACIONAR PÂNICO",
@@ -345,6 +353,13 @@
     },
     "provider": {
       "no_description": "Nenhuma descrição disponível."
-    }
+    },
+  "wallet": {
+    "cashback_title": "Pontos e Cashback",
+    "current_points": "Seus pontos",
+    "recent_points": "Movimentações recentes",
+    "no_history": "Nenhuma movimentação por enquanto."
   }
 }
+}
+

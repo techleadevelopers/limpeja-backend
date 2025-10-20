@@ -242,7 +242,7 @@ export class ProvidersService {
           name: ps.service.name,
           description: ps.service.description,
           icon: ps.service.icon,
-          price: ps.service.price.toNumber(),
+          price: ps.service.price ? ps.service.price.toNumber() : 0,
           createdAt: ps.service.createdAt.toISOString(),
           updatedAt: ps.service.updatedAt.toISOString(),
         },
