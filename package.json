@@ -38,8 +38,8 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.2",
     "@nestjs/platform-socket.io": "^11.1.2",
-    "@nestjs/throttler": "^6.4.0",
     "@nestjs/swagger": "^11.2.0",
+    "@nestjs/throttler": "^6.4.0",
     "@prisma/client": "^5.22.0",
     "@sentry/nestjs": "^10.0.0",
     "@sentry/node": "^10.0.0",
@@ -78,6 +78,7 @@
     "@types/joi": "^17.2.2",
     "@types/jwt-decode": "^2.2.1",
     "@types/long": "^4.0.2",
+    "@types/multer": "^2.0.0",
     "@types/node": "^22.15.29",
     "@types/passport-jwt": "^4.0.1",
     "@types/passport-local": "^1.0.38",
@@ -101,13 +102,19 @@
     "typescript-eslint": "^8.33.1"
   },
   "jest": {
-    "moduleFileExtensions": ["js", "json", "ts"],
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
-    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
   },
