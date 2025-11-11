@@ -5,10 +5,7 @@
   "author": "",
   "private": true,
   "license": "UNLICENSED",
-  "engines": {
-    "node": ">=22.0.0"
-  },
-    "scripts": {
+  "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -29,8 +26,6 @@
     "seed:check": "npm run generate && ts-node scripts/seed-validate.ts"
   },
   "dependencies": {
-    "@google-cloud/storage": "^7.16.0",
-    "@google-cloud/vision": "^5.2.0",
     "@keyv/redis": "^5.1.0",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/bull": "^11.0.3",
@@ -43,9 +38,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.2",
     "@nestjs/platform-socket.io": "^11.1.2",
-    "@nestjs/swagger": "^11.2.0",
     "@nestjs/throttler": "^6.4.0",
-    "@prisma/client": "^5.22.0",
     "@sentry/nestjs": "^10.0.0",
     "@sentry/node": "^10.0.0",
     "@sentry/profiling-node": "^10.0.0",
@@ -65,8 +58,8 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "socket.io": "^4.8.1",
-    "swagger-ui-express": "^5.0.1",
     "twilio": "^5.8.0",
+    "uploadthing": "^7.7.4",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
@@ -74,7 +67,9 @@
     "@eslint/js": "^9.28.0",
     "@nestjs/cli": "^11.0.7",
     "@nestjs/schematics": "^11.0.5",
+    "@nestjs/swagger": "^11.2.0",
     "@nestjs/testing": "^11.1.2",
+    "@prisma/client": "^5.22.0",
     "@swc/cli": "^0.6.0",
     "@swc/core": "^1.11.29",
     "@types/bcrypt": "^5.0.2",
@@ -97,6 +92,7 @@
     "prisma": "^5.22.0",
     "source-map-support": "^0.5.21",
     "supertest": "^7.1.1",
+    "swagger-ui-express": "^5.0.1",
     "ts-jest": "^29.3.4",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
@@ -122,6 +118,6 @@
     "testEnvironment": "node"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed/seed.ts"
+    "seed": "ts-node prisma/seed/seed.ts && ts-node prisma/seed/align.ts"
   }
 }

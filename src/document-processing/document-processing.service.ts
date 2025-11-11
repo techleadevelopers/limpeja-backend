@@ -9,7 +9,7 @@ export class DocumentProcessingService {
 
   constructor(private readonly uploadService: UploadService) {}
 
-  async uploadImage(file: File, destinationPath: string): Promise<string> {
+  async uploadImage(file: File, destinationPath: string, _slug?: string): Promise<string> {
     try {
       const filename = destinationPath?.split('/')?.pop() || file.originalname || 'upload.jpg';
       const result = await this.uploadService.uploadFile(file.buffer, filename, file.mimetype);
@@ -39,4 +39,5 @@ export class DocumentProcessingService {
     return true;
   }
 }
+
 

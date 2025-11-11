@@ -1,60 +1,36 @@
-import { Injectable, HttpException } from '@nestjs/common';
-import axios from 'axios';
+import { Injectable, HttpException, Logger } from '@nestjs/common';
+import { UTApi } from 'uploadthing/server';
+import { Blob } from 'buffer';
 
 @Injectable()
 export class UploadService {
-  private readonly apiUrl = process.env.UPLOADTHING_URL || 'https://uploadthing.com/api';
-  private readonly apiKey = (process.env.UPLOADTHING_SECRET || process.env.UPLOADTHING_TOKEN) as string;
-  private readonly appId = process.env.UPLOADTHING_APP_ID as string;
+  private readonly logger = new Logger(UploadService.name);
+  private readonly apiKey = (process.env.UPLOADTHING_TOKEN || process.env.UPLOADTHING_SECRET) as string;
+  private readonly utapi = new UTApi({ token: (process.env.UPLOADTHING_TOKEN || process.env.UPLOADTHING_SECRET) as string });
 
   private ensureConfig() {
-    if (!this.apiKey || !this.appId) {
-      throw new HttpException('UploadThing não configurado (chaves ausentes)', 500);
+    if (!this.apiKey) {
+      throw new HttpException('UploadThing não configurado (token ausente)', 500);
     }
   }
 
   async uploadFile(buffer: Buffer, filename: string, contentType: string) {
     this.ensureConfig();
     try {
-      // 1) Cria URL temporária
-      const { data } = await axios.post(
-        `${this.apiUrl}/upload/create`,
-        {
-          files: [
-            {
-              name: filename,
-              size: buffer.length,
-              type: contentType,
-            },
-          ],
-          appId: this.appId,
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'x-uploadthing-api-key': this.apiKey,
-          },
-        },
-      );
-
-      const items = Array.isArray(data) ? data : Array.isArray((data as any)?.data) ? (data as any).data : [];
-      const uploadUrl = items?.[0]?.url;
-      const fileKey = items?.[0]?.key;
-      if (!uploadUrl || !fileKey) throw new Error('Falha ao criar URL de upload');
-
-      // 2) PUT do arquivo
-      await axios.put(uploadUrl, buffer, { headers: { 'Content-Type': contentType } });
-
-      // 3) URL pública final
-      const publicUrl = `https://utfs.io/f/${fileKey}`;
-      return { ok: true, url: publicUrl };
+      const blob = new Blob([buffer], { type: contentType || 'application/octet-stream' });
+      this.logger.log(`[UploadThing] Enviando upload via UTApi (filename=${filename})`);
+      const result: any = await this.utapi.uploadFiles(blob, { name: filename } as any);
+      if (result?.error) {
+        throw new Error(result.error?.message || 'UploadThing error');
+      }
+      const data: any = result?.data;
+      const file: any = Array.isArray(data) ? data[0] : data;
+      const url: string | undefined = file?.url || (file?.key ? `https://utfs.io/f/${file.key}` : undefined);
+      if (!url) throw new Error('UploadThing não retornou URL pública');
+      return { ok: true, url };
     } catch (error: any) {
       // eslint-disable-next-line no-console
-      console.error('[UploadThing Error]', {
-        status: error?.response?.status,
-        url: error?.config?.url,
-        data: error?.response?.data || error?.message || error,
-      });
+      console.error('[UploadThing Error]', { message: error?.message || String(error) });
       throw new HttpException('Falha ao fazer upload no UploadThing', 500);
     }
   }
