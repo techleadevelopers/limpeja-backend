@@ -23,7 +23,8 @@
     "prisma:migrate:reset": "prisma migrate reset --force",
     "prisma:studio": "prisma studio",
     "seed:validate": "ts-node scripts/seed-validate.ts",
-    "seed:check": "npm run generate && ts-node scripts/seed-validate.ts"
+    "seed:check": "npm run generate && ts-node scripts/seed-validate.ts",
+    "backfill:location": "ts-node scripts/backfill-address-location.ts"
   },
   "dependencies": {
     "@keyv/redis": "^5.1.0",
