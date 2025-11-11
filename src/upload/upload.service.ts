@@ -1,6 +1,5 @@
 import { Injectable, HttpException, Logger } from '@nestjs/common';
 import { UTApi } from 'uploadthing/server';
-import { Blob } from 'buffer';
 
 @Injectable()
 export class UploadService {
@@ -17,9 +16,10 @@ export class UploadService {
   async uploadFile(buffer: Buffer, filename: string, contentType: string) {
     this.ensureConfig();
     try {
-      const blob = new Blob([buffer], { type: contentType || 'application/octet-stream' });
-      this.logger.log(`[UploadThing] Enviando upload via UTApi (filename=${filename})`);
-      const result: any = await this.utapi.uploadFiles(blob, { name: filename } as any);
+      const ct = contentType || 'application/octet-stream';
+      this.logger.log(`[UploadThing] Enviando upload via UTApi (filename=${filename}, contentType=${ct})`);
+      // Usa Buffer + metadados (forma suportada na SDK >=6.8)
+      const result: any = await this.utapi.uploadFiles(buffer as any, { name: filename, contentType: ct } as any);
       if (result?.error) {
         throw new Error(result.error?.message || 'UploadThing error');
       }
