@@ -3,8 +3,8 @@ import axios from 'axios';
 
 @Injectable()
 export class UploadService {
-  private readonly apiUrl = process.env.UPLOADTHING_URL || 'https://api.uploadthing.com/v1';
-  private readonly apiKey = process.env.UPLOADTHING_SECRET as string;
+  private readonly apiUrl = process.env.UPLOADTHING_URL || 'https://uploadthing.com/api';
+  private readonly apiKey = (process.env.UPLOADTHING_SECRET || process.env.UPLOADTHING_TOKEN) as string;
   private readonly appId = process.env.UPLOADTHING_APP_ID as string;
 
   private ensureConfig() {
@@ -37,8 +37,9 @@ export class UploadService {
         },
       );
 
-      const uploadUrl = data?.[0]?.url;
-      const fileKey = data?.[0]?.key;
+      const items = Array.isArray(data) ? data : Array.isArray((data as any)?.data) ? (data as any).data : [];
+      const uploadUrl = items?.[0]?.url;
+      const fileKey = items?.[0]?.key;
       if (!uploadUrl || !fileKey) throw new Error('Falha ao criar URL de upload');
 
       // 2) PUT do arquivo
@@ -49,9 +50,12 @@ export class UploadService {
       return { ok: true, url: publicUrl };
     } catch (error: any) {
       // eslint-disable-next-line no-console
-      console.error('[UploadThing Error]', error?.response?.data || error?.message || error);
+      console.error('[UploadThing Error]', {
+        status: error?.response?.status,
+        url: error?.config?.url,
+        data: error?.response?.data || error?.message || error,
+      });
       throw new HttpException('Falha ao fazer upload no UploadThing', 500);
     }
   }
 }
-
