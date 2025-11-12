@@ -83,11 +83,17 @@ export class ProvidersController {
     const safeLat = typeof lat === 'number' && !Number.isNaN(lat) ? lat : undefined;
     const safeLon = typeof lon === 'number' && !Number.isNaN(lon) ? lon : undefined;
 
-    // CORREÇÃO: Passe lat/lng numéricos pro service pra cálculo de distance (se fornecidos)
-    const providers = await this.providersService.findTopRatedOrExperiencedProviders(safeLat, safeLon);
-    this.logger.log(`[ProvidersController] findRecommendedProviders: Retornando ${providers.length} provedores.`);
-    // NOVO: Mapeamento inclui novos campos opcionais para sinais premium
-    return providers.map(provider => new ProviderDetailsDto(provider));
+    try {
+      // CORREÇÃO: Passe lat/lng numéricos pro service pra cálculo de distance (se fornecidos)
+      const providers = await this.providersService.findTopRatedOrExperiencedProviders(safeLat, safeLon);
+      this.logger.log(`[ProvidersController] findRecommendedProviders: Retornando ${providers.length} provedores.`);
+      return providers.map(provider => new ProviderDetailsDto(provider));
+    } catch (err: any) {
+      // Fallback hardening: nunca retornar 500 para recomendações
+      this.logger.error(`[ProvidersController] findRecommendedProviders: erro interno, retornando fallback simples. Erro: ${err?.message || err}`);
+      const fallback = await this.providersService.findAllProviders({ limit: 5 });
+      return fallback.map(p => new ProviderDetailsDto(p));
+    }
   }
 
   @Get('nearby')
