@@ -40,7 +40,18 @@ async function bootstrap() {
     console.warn('[Sentry] SENTRY_DSN não configurado. O monitoramento de erros e performance do Sentry está desativado.');
   }
 
-  app.use(json({ limit: '10mb' }));
+  // Captura o rawBody para validação de webhooks (ex.: HMAC)
+  app.use(json({
+    limit: '10mb',
+    // Anexa o buffer original na requisição
+    verify: (req: any, _res, buf: Buffer) => {
+      try {
+        req.rawBody = Buffer.from(buf);
+      } catch {
+        // ignora
+      }
+    }
+  }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
   const allowedOrigins = [
