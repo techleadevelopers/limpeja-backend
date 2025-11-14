@@ -391,20 +391,6 @@ export class AuthService {
               // Defaults iniciais de métricas (exibição): 94% e 25 min
               acceptanceRate: 94,
               averageResponseTime: 25,
-              address: {
-                create: {
-                  cep: address.cep,
-                  street: address.street,
-                  number: address.number,
-                  neighborhood: address.neighborhood,
-                  city: address.city,
-                  state: address.state,
-                  complement: address.complement ?? null,
-                  // PROVISÓRIO: não salvar lat/lng no cadastro inicial de provedor para evitar 22P03
-                  latitude: null,
-                  longitude: null,
-                },
-              },
             },
           },
         },
