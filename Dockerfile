@@ -1,38 +1,32 @@
-FROM node:22-slim
-
-# deps nativas mínimas
-RUN apt-get update -y && apt-get install -y \
-    openssl ca-certificates dumb-init curl python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
+# ---- STAGE 1: BUILD ----
+FROM node:22-slim AS build
 
 WORKDIR /usr/src/app
 
-# 1) instalar deps (inclui dev, pois NODE_ENV ainda não é production)
+ARG CACHEBUST=1
+
 COPY package*.json ./
-RUN npm ci --quiet
+RUN npm ci
 
-# 2) copiar código e gerar prisma client
 COPY . .
+
 RUN npx prisma generate
+RUN npm run build
 
-# 3) build
-RUN npm run build --verbose
 
-# 4) debug + verificação: aceita dist/src/main.js ou dist/main.js
-RUN echo "=== DEBUG: dist ===" && ls -la dist || true && \
-    echo "=== DEBUG: possíveis entradas ===" && \
-    (test -f dist/src/main.js || test -f dist/main.js)
+# ---- STAGE 2: PRODUCTION ----
+FROM node:22-slim
 
-# 5) produção: remover dev deps, mas manter @prisma/client
-# (assegure que @prisma/client está em "dependencies" no package.json)
-RUN npm prune --production --silent && \
-    node -e "require('@prisma/client'); console.log('Prisma client OK')"
+WORKDIR /usr/src/app
 
-ENV NODE_ENV=production PORT=8080
+RUN apt-get update -y && apt-get install -y openssl dumb-init && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /usr/src/app/dist ./dist
+COPY --from=build /usr/src/app/node_modules ./node_modules
+COPY --from=build /usr/src/app/prisma ./prisma
+
+ENV NODE_ENV=production
+ENV PORT=8080
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
-
-# 6) CMD mantém dist/src/main.js, com fallback para dist/main.js
-CMD ["dumb-init","sh","-c","node dist/src/main.js || node dist/main.js"]
+CMD ["dumb-init","node","dist/src/main.js"]
