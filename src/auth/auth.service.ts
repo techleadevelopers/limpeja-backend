@@ -378,6 +378,22 @@ export class AuthService {
         },
       });
 
+      // Normaliza latitude/longitude para garantir apenas number ou null (evitar 22P03)
+      let normalizedLatitude: number | null = null;
+      let normalizedLongitude: number | null = null;
+      if (address) {
+        const latRaw: any = (address as any).latitude;
+        const lonRaw: any = (address as any).longitude;
+
+        const latNum = typeof latRaw === 'number' ? latRaw : (latRaw !== undefined && latRaw !== null ? Number(latRaw) : null);
+        const lonNum = typeof lonRaw === 'number' ? lonRaw : (lonRaw !== undefined && lonRaw !== null ? Number(lonRaw) : null);
+
+        normalizedLatitude = latNum !== null && Number.isFinite(latNum) ? latNum : null;
+        normalizedLongitude = lonNum !== null && Number.isFinite(lonNum) ? lonNum : null;
+
+        this.logger.log(`[AuthService] registerProvider address lat/lng normalizados: lat=${normalizedLatitude}, lng=${normalizedLongitude}`);
+      }
+
       // Etapa 2: cria o Provider com endereço nested (incluindo latitude/longitude)
       await this.prisma.provider.create({
         data: {
@@ -392,21 +408,19 @@ export class AuthService {
           bio: null,
           badges: [],
           address: {
-            create: {
-              cep: address.cep,
-              street: address.street,
-              number: address.number,
-              neighborhood: address.neighborhood,
-              city: address.city,
-              state: address.state,
-              complement: address.complement ?? null,
-              latitude: address.latitude !== undefined && address.latitude !== null
-                ? Number(address.latitude)
-                : null,
-              longitude: address.longitude !== undefined && address.longitude !== null
-                ? Number(address.longitude)
-                : null,
-            },
+            create: address
+              ? {
+                  cep: address.cep,
+                  street: address.street,
+                  number: address.number,
+                  neighborhood: address.neighborhood,
+                  city: address.city,
+                  state: address.state,
+                  complement: address.complement ?? null,
+                  latitude: normalizedLatitude,
+                  longitude: normalizedLongitude,
+                }
+              : undefined,
           },
         },
       });
