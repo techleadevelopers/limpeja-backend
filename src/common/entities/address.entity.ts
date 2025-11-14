@@ -1,4 +1,4 @@
-import { Address as PrismaAddress, Prisma } from '@prisma/client'; // CORREÇÃO: Importar Prisma para Decimal
+import { Address as PrismaAddress } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsOptional } from 'class-validator'; // Importe conforme necessário para DTOs, não estritamente para entidades
 
@@ -27,12 +27,11 @@ export class AddressEntity implements PrismaAddress {
   @ApiProperty({ description: 'Estado (UF)', example: 'SP' })
   state: string;
 
-  // CORREÇÃO: Adicionado latitude e longitude
   @ApiPropertyOptional({ description: 'Latitude do endereço', example: -23.5505 })
-  latitude: Prisma.Decimal;
+  latitude: number | null;
 
   @ApiPropertyOptional({ description: 'Longitude do endereço', example: -46.6333 })
-  longitude: Prisma.Decimal;
+  longitude: number | null;
 
   // As chaves estrangeiras clientId e providerId são internas do Prisma e geralmente não são expostas diretamente
   // em DTOs de retorno, mas podem estar na entidade para completude do modelo.
@@ -46,3 +45,4 @@ export class AddressEntity implements PrismaAddress {
     Object.assign(this, partial);
   }
 }
+

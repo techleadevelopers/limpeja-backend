@@ -378,7 +378,7 @@ export class AuthService {
         },
       });
 
-      // Etapa 2: cria o Provider separado, vinculado ao userId
+      // Etapa 2: cria o Provider com endereço nested (incluindo latitude/longitude)
       await this.prisma.provider.create({
         data: {
           userId: createdUser.id,
@@ -391,6 +391,23 @@ export class AuthService {
           verificationStatus: VerificationStatus.PENDING_INITIAL_REVIEW,
           bio: null,
           badges: [],
+          address: {
+            create: {
+              cep: address.cep,
+              street: address.street,
+              number: address.number,
+              neighborhood: address.neighborhood,
+              city: address.city,
+              state: address.state,
+              complement: address.complement ?? null,
+              latitude: address.latitude !== undefined && address.latitude !== null
+                ? Number(address.latitude)
+                : null,
+              longitude: address.longitude !== undefined && address.longitude !== null
+                ? Number(address.longitude)
+                : null,
+            },
+          },
         },
       });
 

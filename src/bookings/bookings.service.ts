@@ -227,8 +227,8 @@ export class BookingsService {
             neighborhood: createBookingDto.address.neighborhood,
             city: createBookingDto.address.city,
             state: createBookingDto.address.state,
-            latitude: new Prisma.Decimal(createBookingDto.address.latitude),
-            longitude: new Prisma.Decimal(createBookingDto.address.longitude),
+            latitude: Number(createBookingDto.address.latitude),
+            longitude: Number(createBookingDto.address.longitude),
           },
         });
         this.logger.log(`[BookingsService] create - Novo endereço criado com ID: ${newAddress.id}`);
