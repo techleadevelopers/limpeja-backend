@@ -1,8 +1,7 @@
-import { Address as PrismaAddress } from '@prisma/client';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsOptional } from 'class-validator'; // Importe conforme necessário para DTOs, não estritamente para entidades
 
-export class AddressEntity implements PrismaAddress {
+export class AddressEntity {
   @ApiProperty({ description: 'ID único do endereço', example: 'uuid-do-endereco' })
   id: string;
 
@@ -45,4 +44,3 @@ export class AddressEntity implements PrismaAddress {
     Object.assign(this, partial);
   }
 }
-
