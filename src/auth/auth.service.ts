@@ -231,9 +231,9 @@ export class AuthService {
                   city: address.city,
                   state: address.state,
                   complement: address.complement ?? null,
-                  // Garantir Decimal para Postgres (evita 22P03 em bind parameter)
-                  latitude: geoCoordinates?.latitude !== undefined ? new Prisma.Decimal(geoCoordinates.latitude) : undefined,
-                  longitude: geoCoordinates?.longitude !== undefined ? new Prisma.Decimal(geoCoordinates.longitude) : undefined,
+                  // PROVISÓRIO: evitar 22P03 no cadastro de provedor (lat/lng nulos aqui, tratar depois no perfil)
+                  latitude: null,
+                  longitude: null,
                 },
               },
             },
