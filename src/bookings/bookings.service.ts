@@ -158,6 +158,18 @@ export class BookingsService {
           calculatedTotalPrice = providerService.price;
           break;
         case 'HOURLY':
+          // Fallback robusto: se o app n��o enviar requestedDurationMinutes,
+          // usar a durationMinutes configurada no ProviderService quando positiva.
+          if (!createBookingDto.requestedDurationMinutes || createBookingDto.requestedDurationMinutes <= 0) {
+            const serviceDefaultDuration = (providerService as any).durationMinutes as number | null | undefined;
+            if (serviceDefaultDuration && serviceDefaultDuration > 0) {
+              this.logger.log(
+                `[BookingsService] create - Aplicando fallback de durationMinutes do servi��o HOURLY: ${serviceDefaultDuration} minutos.`,
+              );
+              createBookingDto.requestedDurationMinutes = serviceDefaultDuration;
+            }
+          }
+
           if (!createBookingDto.requestedDurationMinutes) {
             throw new BadRequestException(await this.i18n.translate('booking.badRequest.durationRequired', locale));
           }
