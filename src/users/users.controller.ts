@@ -198,6 +198,29 @@ export class UsersController {
     }
   }
 
+  @Delete('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Solicitar exclusão da própria conta (LGPD)' })
+  @ApiResponse({ status: 202, description: 'Solicitação recebida.', type: MessageResponseDto })
+  @ApiResponse({ status: 401, description: 'Não autorizado.' })
+  @ApiResponse({ status: 500, description: 'Erro interno.' })
+  @HttpCode(HttpStatus.ACCEPTED)
+  async deleteMyAccount(@Req() req: Request): Promise<MessageResponseDto> {
+    try {
+      const userId = (req.user as RequestUserPayload).userId;
+      this.logger.log(`[UsersController] deleteMyAccount: Para ${userId}.`);
+      await this.usersService.requestAccountDeletion(userId);
+      return {
+        message:
+          'Solicitação de exclusão recebida. Sua conta será desativada e removida após o período de carência. Um e-mail de confirmação será enviado.',
+      };
+    } catch (error) {
+      this.logger.error(`[UsersController] deleteMyAccount: Erro: ${error.message}`);
+      throw error;
+    }
+  }
+
   @Delete('delete-account')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
