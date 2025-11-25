@@ -25,6 +25,7 @@ import { SortByOption } from '../search/dto/search-query.dto';
 import { ProviderSearchDto } from './dto/provider-search.dto';
 import { UpdateProviderProfileDto } from './dto/update-provider-profile.dto';
 import { Decimal } from '@prisma/client/runtime/library';
+import { geocodeAddress } from '../utils/geocoding.service';
 
 // Type principal para provedores com todas as inclusões necessárias para mapeamento
 export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
@@ -144,6 +145,38 @@ export class ProvidersService {
     private readonly documentProcessingService: DocumentProcessingService,
     private readonly cacheService: CacheService,
   ) {}
+
+  private buildAddressString(address?: Partial<Address>): string | null {
+    if (!address) return null;
+    const parts = [
+      address.street,
+      address.number,
+      address.complement,
+      address.neighborhood,
+      address.city,
+      address.state,
+      address.cep,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(', ') : null;
+  }
+
+  private applyGeocodeFallback(
+    address: Partial<Address>,
+    geocoded?: { latitude: number; longitude: number } | null,
+  ): { latitude?: number; longitude?: number } {
+    const latitude = address.latitude !== undefined ? address.latitude : geocoded?.latitude;
+    const longitude = address.longitude !== undefined ? address.longitude : geocoded?.longitude;
+    return { latitude, longitude };
+  }
+
+  private async updateAddressLocationPoint(addressId: string, latitude?: number, longitude?: number) {
+    if (!addressId || latitude === undefined || longitude === undefined) return;
+    await this.prisma.$executeRaw`
+      UPDATE "Address"
+      SET location = ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)
+      WHERE id = ${addressId};
+    `;
+  }
 
   // NOVO: Helper para calcular nextAvailable (primeiro slot futuro, alinhado com relatório)
   private async calculateNextAvailable(providerId: string): Promise<{ date: string; time: string } | undefined> {
@@ -461,11 +494,21 @@ export class ProvidersService {
       pixKey: data.pixKey,
     };
 
+    let finalLatitude: number | undefined;
+    let finalLongitude: number | undefined;
     if (data.address) {
+      const addressString = this.buildAddressString(data.address as Partial<Address>);
+      const geo = addressString ? await geocodeAddress(addressString) : null;
+      const coords = this.applyGeocodeFallback(data.address as Partial<Address>, geo);
+      finalLatitude = coords.latitude;
+      finalLongitude = coords.longitude;
+      const addressPayload = { ...data.address } as any;
+      if (finalLatitude !== undefined) addressPayload.latitude = finalLatitude;
+      if (finalLongitude !== undefined) addressPayload.longitude = finalLongitude;
       updateData.address = {
         upsert: {
-          create: data.address,
-          update: data.address,
+          create: addressPayload,
+          update: addressPayload,
         },
       };
     }
@@ -497,6 +540,9 @@ export class ProvidersService {
     await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:${updatedProvider.id}`);
     await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:user:${userId}`);
     this.logger.log(`[ProvidersService] updateByUserId: Cache de provedores invalidado após atualização.`);
+    if (updatedProvider.address?.id && finalLatitude !== undefined && finalLongitude !== undefined) {
+      await this.updateAddressLocationPoint(updatedProvider.address.id, finalLatitude, finalLongitude);
+    }
 
     this.logger.log(`[ProvidersService] updateByUserId: Provedor com userId ${userId} atualizado com sucesso.`);
     // Telemetria: provider_profile_updated
@@ -528,11 +574,21 @@ export class ProvidersService {
       pixKey: data.pixKey,
     };
 
+    let finalLatitude: number | undefined;
+    let finalLongitude: number | undefined;
     if (data.address) {
+      const addressString = this.buildAddressString(data.address as Partial<Address>);
+      const geo = addressString ? await geocodeAddress(addressString) : null;
+      const coords = this.applyGeocodeFallback(data.address as Partial<Address>, geo);
+      finalLatitude = coords.latitude;
+      finalLongitude = coords.longitude;
+      const addressPayload = { ...data.address } as any;
+      if (finalLatitude !== undefined) addressPayload.latitude = finalLatitude;
+      if (finalLongitude !== undefined) addressPayload.longitude = finalLongitude;
       updateData.address = {
         upsert: {
-          create: data.address,
-          update: data.address,
+          create: addressPayload,
+          update: addressPayload,
         },
       };
     }
@@ -561,6 +617,9 @@ export class ProvidersService {
     await this.cacheService.del(this.PROVIDERS_CACHE_KEY);
     await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:${updatedProvider.id}`);
     this.logger.log(`[ProvidersService] updateById: Cache de provedores invalidado após atualização.`);
+    if (updatedProvider.address?.id && finalLatitude !== undefined && finalLongitude !== undefined) {
+      await this.updateAddressLocationPoint(updatedProvider.address.id, finalLatitude, finalLongitude);
+    }
 
     const mapped = this.mapProviderToCalculatedRating(updatedProvider as ProviderWithIncludes);
     mapped.nextAvailable = await this.calculateNextAvailable(updatedProvider.id);
@@ -569,12 +628,60 @@ export class ProvidersService {
 
   async remove(id: string): Promise<void> {
     this.logger.log(`[ProvidersService] remove: Tentando remover provedor com ID: ${id}`);
-    const provider = await this.prisma.provider.findUnique({ where: { id } });
+    const provider = await this.prisma.provider.findUnique({
+      where: { id },
+      include: {
+        bookings: true,
+        providerServices: true,
+        subscriptions: true,
+        availability: true,
+        address: true,
+      },
+    });
     if (!provider) {
       this.logger.warn(`[ProvidersService] remove: Provedor com ID "${id}" não encontrado.`);
       throw new NotFoundException(`Provedor com ID "${id}" não encontrado.`);
     }
-    await this.prisma.provider.delete({ where: { id } });
+
+    const bookingIds = provider.bookings.map(b => b.id);
+
+    await this.prisma.$transaction(async tx => {
+      if (bookingIds.length > 0) {
+        const intents = await tx.paymentIntent.findMany({
+          where: { bookingId: { in: bookingIds } },
+          select: { id: true },
+        });
+        const intentIds = intents.map(i => i.id);
+
+        if (intentIds.length > 0) {
+          await tx.paymentEvent.deleteMany({ where: { paymentIntentId: { in: intentIds } } });
+        }
+
+        await tx.paymentIntent.deleteMany({ where: { bookingId: { in: bookingIds } } });
+        await tx.ledgerEntry.deleteMany({ where: { bookingId: { in: bookingIds } } });
+        await tx.transaction.deleteMany({ where: { bookingId: { in: bookingIds } } });
+        await tx.couponUsage.deleteMany({ where: { bookingId: { in: bookingIds } } });
+        await tx.dispute.deleteMany({ where: { bookingId: { in: bookingIds } } });
+        await tx.supportTicket.deleteMany({ where: { bookingId: { in: bookingIds } } });
+        await tx.incident.deleteMany({ where: { bookingId: { in: bookingIds } } });
+        await tx.guaranteeClaim.deleteMany({ where: { bookingId: { in: bookingIds } } });
+        await tx.review.deleteMany({ where: { bookingId: { in: bookingIds } } });
+        await tx.booking.deleteMany({ where: { id: { in: bookingIds } } });
+      }
+
+      await tx.subscription.deleteMany({ where: { providerId: id } });
+      await tx.providerServiceVersion.deleteMany({ where: { providerService: { providerId: id } } });
+      await tx.providerService.deleteMany({ where: { providerId: id } });
+      await tx.availability.deleteMany({ where: { providerId: id } });
+      await tx.transaction.deleteMany({ where: { providerId: id } });
+      await tx.guaranteeClaim.deleteMany({ where: { providerId: id } });
+      await tx.review.deleteMany({ where: { providerId: id } });
+      await tx.pricingRule.deleteMany({ where: { providerId: id } });
+      await tx.address.deleteMany({ where: { providerId: id } });
+
+      await tx.provider.delete({ where: { id } });
+    });
+
     await this.cacheService.del(this.PROVIDERS_CACHE_KEY);
     await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:${id}`);
     await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:user:${provider.userId}`);
