@@ -394,8 +394,8 @@ export class AuthService {
         this.logger.log(`[AuthService] registerProvider address lat/lng normalizados: lat=${normalizedLatitude}, lng=${normalizedLongitude}`);
       }
 
-      // Etapa 2: cria o Provider com endereço nested (incluindo latitude/longitude)
-      await this.prisma.provider.create({
+      // Etapa 2: cria o Provider sem address nested (evita bind incorreto no campo geometry)
+      const createdProvider = await this.prisma.provider.create({
         data: {
           userId: createdUser.id,
           fullName,
@@ -407,23 +407,39 @@ export class AuthService {
           verificationStatus: VerificationStatus.PENDING_INITIAL_REVIEW,
           bio: null,
           badges: [],
-          address: {
-            create: address
-              ? {
-                  cep: address.cep,
-                  street: address.street,
-                  number: address.number,
-                  neighborhood: address.neighborhood,
-                  city: address.city,
-                  state: address.state,
-                  complement: address.complement ?? null,
-                  latitude: normalizedLatitude,
-                  longitude: normalizedLongitude,
-                }
-              : undefined,
-          },
         },
       });
+
+      // Cria o endereço separado e seta location via raw (geom point) apenas se houver address
+      if (address) {
+        const createdAddress = await this.prisma.address.create({
+          data: {
+            cep: address.cep,
+            street: address.street,
+            number: address.number,
+            neighborhood: address.neighborhood,
+            city: address.city,
+            state: address.state,
+            complement: address.complement ?? null,
+            latitude: normalizedLatitude,
+            longitude: normalizedLongitude,
+            providerId: createdProvider.id,
+          },
+        });
+
+        if (
+          createdAddress.id &&
+          normalizedLatitude !== null &&
+          normalizedLongitude !== null
+        ) {
+          const wktPoint = `POINT(${normalizedLongitude} ${normalizedLatitude})`;
+          await this.prisma.$executeRaw(Prisma.sql`
+            UPDATE "Address"
+            SET location = ST_GeomFromText(${wktPoint}, 4326)
+            WHERE id = ${createdAddress.id}
+          `);
+        }
+      }
 
       // Indicação (se existir referralCode)
       if (referralCode) {
