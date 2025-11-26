@@ -307,6 +307,11 @@ export class BookingsService {
         // Telemetria: booking_created
         this.logger.log(`[TELEMETRY] booking_created: { bookingId: ${createdBooking.id}, clientId: ${createdBooking.clientId}, providerId: ${createdBooking.providerId}, totalPrice: ${createdBooking.totalPrice.toFixed(2)}, couponId: ${couponId} }`);
 
+        // Se houve cupom, registrar uso (incrementa usesCount/status)
+        if (couponId) {
+          await this.couponsService.markCouponAsUsed(couponId);
+        }
+
         return createdBooking;
 
       } catch (error: any) {
