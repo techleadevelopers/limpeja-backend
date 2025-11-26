@@ -33,6 +33,9 @@ export type UserWithIncludes = Prisma.UserGetPayload<{
     fullName: true;
     phone: true;
     avatarUrl: true;
+    createdAt: true;
+    updatedAt: true;
+    isVerified: true;
     client: {
       select: {
         id: true;
@@ -42,6 +45,8 @@ export type UserWithIncludes = Prisma.UserGetPayload<{
         noShowCount: true;
         cancellationCount: true;
         address: true;
+        createdAt: true;
+        updatedAt: true;
       };
     } | null;
     provider: {
@@ -61,6 +66,12 @@ export type UserWithIncludes = Prisma.UserGetPayload<{
         averageResponseTime: true;
         address: true;
         user: true;
+        createdAt: true;
+        updatedAt: true;
+        fiveStarReviewCount: true;
+        monthlyBookingsCount: true;
+        pixKey: true;
+        pixKeyMasked: true;
         providerServices: { include: { service: true } };
         reviewsReceived: { include: { client: { include: { user: true } } } };
         bookings: { where: { status: "COMPLETED" }, orderBy: { createdAt: "desc" }, take: 100 };
@@ -86,7 +97,7 @@ export class UsersService {
   async findOne(id: string): Promise<UserWithIncludes | null> {
     this.logger.log(`[UsersService] findOne: Buscando usuário por ID: ${id}`);
     try {
-            const user = (await this.prisma.user.findUnique({
+      const user = (await this.prisma.user.findUnique({
         where: { id },
         select: {
           id: true,
@@ -95,6 +106,9 @@ export class UsersService {
           fullName: true,
           phone: true,
           avatarUrl: true,
+          createdAt: true,
+          updatedAt: true,
+          isVerified: true,
           client: {
             select: {
               id: true,
@@ -123,6 +137,12 @@ export class UsersService {
               averageResponseTime: true,
               address: true,
               user: true,
+              createdAt: true,
+              updatedAt: true,
+              fiveStarReviewCount: true,
+              monthlyBookingsCount: true,
+              pixKey: true,
+              pixKeyMasked: true,
               providerServices: { include: { service: true } },
               reviewsReceived: { include: { client: { include: { user: true } } } },
               bookings: {
@@ -137,7 +157,7 @@ export class UsersService {
           referredBy: true,
           referralsMade: true,
         },
-      })) as UserWithIncludes | null;
+      })) as unknown as UserWithIncludes | null;
 
       this.logger.log(`[UsersService] findOne: Usuário encontrado com includes: ${!!user}`);
       if (!user) {
@@ -148,7 +168,7 @@ export class UsersService {
       this.logger.error(`[UsersService] findOne: Erro na query Prisma para ID ${id}: ${error.message}`);
       // Fallback: Query simples sem includes se falhar (ex: relação inexistente ou erro de include)
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        return (await this.prisma.user.findUnique({
+        const fallbackUser = await this.prisma.user.findUnique({
           where: { id },
           select: {
             id: true,
@@ -157,13 +177,46 @@ export class UsersService {
             fullName: true,
             phone: true,
             avatarUrl: true,
-            client: false,
-            provider: false,
-            loyalty: false,
-            referredBy: false,
-            referralsMade: false,
+            client: {
+              select: {
+                id: true,
+                fullName: true,
+                phone: true,
+                cpf: true,
+                noShowCount: true,
+                cancellationCount: true,
+                address: true,
+              },
+            },
+            provider: {
+              select: {
+                id: true,
+                userId: true,
+                fullName: true,
+                phone: true,
+                bio: true,
+                verificationStatus: true,
+                avatarUrl: true,
+                cpf: true,
+                dateOfBirth: true,
+                yearsOfExperience: true,
+                badges: true,
+                acceptanceRate: true,
+                averageResponseTime: true,
+                address: true,
+                user: true,
+                providerServices: { include: { service: true } },
+                reviewsReceived: { include: { client: { include: { user: true } } } },
+                bookings: { where: { status: 'COMPLETED' }, orderBy: { createdAt: 'desc' }, take: 100 },
+                availability: true,
+              },
+            },
+            loyalty: true,
+            referredBy: true,
+            referralsMade: true,
           },
-        })) as unknown as UserWithIncludes | null;
+        });
+        return fallbackUser as unknown as UserWithIncludes | null;
       }
       throw error;
     }
@@ -201,6 +254,9 @@ export class UsersService {
           fullName: true,
           phone: true,
           avatarUrl: true,
+          createdAt: true,
+          updatedAt: true,
+          isVerified: true,
           client: {
             select: {
               id: true,
@@ -229,6 +285,12 @@ export class UsersService {
               averageResponseTime: true,
               address: true,
               user: true,
+              createdAt: true,
+              updatedAt: true,
+              fiveStarReviewCount: true,
+              monthlyBookingsCount: true,
+              pixKey: true,
+              pixKeyMasked: true,
               providerServices: { include: { service: true } },
               reviewsReceived: { include: { client: { include: { user: true } } } },
               bookings: {
@@ -243,7 +305,7 @@ export class UsersService {
           referredBy: true,
           referralsMade: true,
         },
-      })) as UserWithIncludes[];
+      })) as unknown as UserWithIncludes[];
 
       this.logger.log(
         `[UsersService] findAllUsers: Retornando ${users.length} usuários.`,

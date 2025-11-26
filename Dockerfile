@@ -13,6 +13,7 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
+
 # ---- STAGE 2: PRODUCTION ----
 FROM node:22-slim
 
