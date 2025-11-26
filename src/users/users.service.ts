@@ -49,7 +49,6 @@ export type UserWithIncludes = Prisma.UserGetPayload<{
         id: true;
         userId: true;
         fullName: true;
-        email: true;
         phone: true;
         bio: true;
         verificationStatus: true;
@@ -112,7 +111,6 @@ export class UsersService {
               id: true,
               userId: true,
               fullName: true,
-              email: true,
               phone: true,
               bio: true,
               verificationStatus: true,
@@ -150,7 +148,22 @@ export class UsersService {
       this.logger.error(`[UsersService] findOne: Erro na query Prisma para ID ${id}: ${error.message}`);
       // Fallback: Query simples sem includes se falhar (ex: relação inexistente ou erro de include)
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        return (await this.prisma.user.findUnique({ where: { id } })) as UserWithIncludes | null;
+        return (await this.prisma.user.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            fullName: true,
+            phone: true,
+            avatarUrl: true,
+            client: false,
+            provider: false,
+            loyalty: false,
+            referredBy: false,
+            referralsMade: false,
+          },
+        })) as unknown as UserWithIncludes | null;
       }
       throw error;
     }
@@ -172,33 +185,52 @@ export class UsersService {
     }
   }
 
-  // Listar com includes tipados
+  // Listar com select consistente
   async findAllUsers(): Promise<UserWithIncludes[]> {
-    this.logger.log('[UsersService] findAllUsers: Listando todos os usuários com includes.');
+    this.logger.log('[UsersService] findAllUsers: Listando todos os usuários com select.');
     try {
       const users = (await this.prisma.user.findMany({
         orderBy: { createdAt: 'desc' },
         where: {
           deletionScheduledAt: null, // Soft delete do schema
         },
-        include: {
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          fullName: true,
+          phone: true,
+          avatarUrl: true,
           client: {
-            include: { address: true },
+            select: {
+              id: true,
+              fullName: true,
+              phone: true,
+              cpf: true,
+              noShowCount: true,
+              cancellationCount: true,
+              address: true,
+            },
           },
           provider: {
-            include: {
+            select: {
+              id: true,
+              userId: true,
+              fullName: true,
+              phone: true,
+              bio: true,
+              verificationStatus: true,
+              avatarUrl: true,
+              cpf: true,
+              dateOfBirth: true,
+              yearsOfExperience: true,
+              badges: true,
+              acceptanceRate: true,
+              averageResponseTime: true,
               address: true,
               user: true,
-              providerServices: {
-                include: { service: true },
-              },
-              reviewsReceived: {
-                include: {
-                  client: {
-                    include: { user: true },
-                  },
-                },
-              },
+              providerServices: { include: { service: true } },
+              reviewsReceived: { include: { client: { include: { user: true } } } },
               bookings: {
                 where: { status: 'COMPLETED' },
                 orderBy: { createdAt: 'desc' },
@@ -214,12 +246,12 @@ export class UsersService {
       })) as UserWithIncludes[];
 
       this.logger.log(
-        `[UsersService] findAllUsers: Retornando ${users.length} usuários com includes.`,
+        `[UsersService] findAllUsers: Retornando ${users.length} usuários.`,
       );
       return users;
     } catch (error: any) {
       this.logger.error(
-        `[UsersService] findAllUsers: Erro ao listar usuários com includes: ${error.message}`,
+        `[UsersService] findAllUsers: Erro ao listar usuários: ${error.message}`,
       );
       throw error;
     }
