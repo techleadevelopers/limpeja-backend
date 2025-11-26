@@ -1049,7 +1049,18 @@ export class ProvidersService {
     this.logger.log(`[ProvidersService] search (fallback): Encontrados ${providers.length} provedores após filtro.`);
 
     const providersWithCalculatedRating: ProviderWithCalculatedRating[] = await Promise.all(providers.map(async provider => {
-      const mapped = this.mapProviderToCalculatedRating(provider as ProviderWithIncludes);
+      // Fallback: se latitude/longitude foram informados, calcula distância em memória
+      let distance: number | undefined;
+      if (latitude !== undefined && longitude !== undefined) {
+        distance = this.calculateDistanceMeters(
+          latitude,
+          longitude,
+          provider.address?.latitude ?? null,
+          provider.address?.longitude ?? null,
+        );
+      }
+
+      const mapped = this.mapProviderToCalculatedRating(provider as ProviderWithIncludes, distance);
       // O cálculo de nextAvailable é feito aqui, pois mapProviderToCalculatedRating é síncrona
       mapped.nextAvailable = await this.calculateNextAvailable(provider.id);
       return mapped;
