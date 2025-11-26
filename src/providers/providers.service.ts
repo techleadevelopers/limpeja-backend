@@ -169,6 +169,38 @@ export class ProvidersService {
     return { latitude, longitude };
   }
 
+  // Distância haversine em metros (fallback quando PostGIS/distância vinda do banco não estiver disponível)
+  private calculateDistanceMeters(
+    baseLat?: number,
+    baseLon?: number,
+    targetLat?: number | null,
+    targetLon?: number | null,
+  ): number | undefined {
+    if (
+      baseLat === undefined ||
+      baseLon === undefined ||
+      targetLat === undefined ||
+      targetLat === null ||
+      targetLon === undefined ||
+      targetLon === null
+    ) {
+      return undefined;
+    }
+
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const R = 6371000; // Earth radius in meters
+    const dLat = toRad(targetLat - baseLat);
+    const dLon = toRad(targetLon - baseLon);
+    const lat1 = toRad(baseLat);
+    const lat2 = toRad(targetLat);
+
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
   private async updateAddressLocationPoint(addressId: string, latitude?: number, longitude?: number) {
     if (!addressId || latitude === undefined || longitude === undefined) return;
     await this.prisma.$executeRaw`
