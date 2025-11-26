@@ -1268,10 +1268,64 @@ export class ProvidersService {
 
     this.logger.log(`[ProvidersService] findTopRatedOrExperiencedProviders: Encontrados ${providers.length} provedores.`);
 
-    const providersWithCalculatedRating: ProviderWithCalculatedRating[] = await Promise.all(providers.map(async provider => {
+    const providersWithCalculatedRating: ProviderWithCalculatedRating[] = await Promise.all(providers.map(async (provider: any) => {
+      if (!provider.providerServices && provider.providerServicesAgg) {
+        provider.providerServices = provider.providerServicesAgg.map((ps: any) => ({
+          id: ps.id,
+          providerId: ps.providerId,
+          serviceId: ps.serviceId,
+          price: ps.price != null ? new Decimal(ps.price) : new Decimal(0),
+          durationMinutes: ps.durationMinutes,
+          description: ps.description,
+          createdAt: ps.createdAt,
+          updatedAt: ps.updatedAt,
+          pricingType: ps.pricingType,
+          pricePerSquareMeter: ps.pricePerSquareMeter ? new Decimal(ps.pricePerSquareMeter) : null,
+          pricePerRoom: ps.pricePerRoom ? new Decimal(ps.pricePerRoom) : null,
+          service: {
+            id: ps.service.id,
+            name: ps.service.name,
+            description: ps.service.description,
+            icon: ps.service.icon,
+            price: ps.service.price != null ? new Decimal(ps.service.price) : new Decimal(0),
+            createdAt: ps.service.createdAt,
+            updatedAt: ps.service.updatedAt,
+          },
+        }));
+      }
+      if (!provider.address && provider.addressId) {
+        provider.address = {
+          id: provider.addressId,
+          cep: provider.cep,
+          street: provider.street,
+          number: provider.number,
+          complement: provider.complement,
+          neighborhood: provider.neighborhood,
+          city: provider.city,
+          state: provider.state,
+          clientId: null,
+          providerId: provider.providerId,
+          latitude: provider.latitude_val ?? provider.latitude ?? null,
+          longitude: provider.longitude_val ?? provider.longitude ?? null,
+          location: null,
+        } as Address;
+      }
+      if (!provider.user && provider.email) {
+        provider.user = {
+          email: provider.email,
+          role: provider.role,
+          isVerified: provider.isVerified,
+          fullName: provider.user_fullName ?? provider.fullName,
+        };
+      }
+
       let distance = undefined;
-      if (latitude && longitude && typeof provider === 'object' && 'distance_m' in provider) {
+      if (latitude && longitude && typeof provider === 'object' && 'distance_m' in provider && provider.distance_m !== null && provider.distance_m !== undefined) {
         distance = parseFloat(provider.distance_m); // Em metros
+      } else if (latitude !== undefined && longitude !== undefined) {
+        const targetLat = provider.latitude_val ?? provider.address?.latitude ?? null;
+        const targetLon = provider.longitude_val ?? provider.address?.longitude ?? null;
+        distance = this.calculateDistanceMeters(latitude, longitude, targetLat, targetLon);
       }
       const mapped = this.mapProviderToCalculatedRating(provider as ProviderWithIncludes, distance);
       // O cálculo de nextAvailable é feito aqui, pois mapProviderToCalculatedRating é síncrona
