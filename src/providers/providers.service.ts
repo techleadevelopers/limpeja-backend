@@ -26,6 +26,7 @@ import { ProviderSearchDto } from './dto/provider-search.dto';
 import { UpdateProviderProfileDto } from './dto/update-provider-profile.dto';
 import { Decimal } from '@prisma/client/runtime/library';
 import { geocodeAddress } from '../utils/geocoding.service';
+import { SettingsService } from '../settings/settings.service';
 
 // Type principal para provedores com todas as inclusões necessárias para mapeamento
 export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
@@ -144,6 +145,7 @@ export class ProvidersService {
     private prisma: PrismaService,
     private readonly documentProcessingService: DocumentProcessingService,
     private readonly cacheService: CacheService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   private buildAddressString(address?: Partial<Address>): string | null {
@@ -199,6 +201,39 @@ export class ProvidersService {
       Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
+  }
+
+  // Aplica filtro de raio salvo do provedor (serviceRadiusKm). Distância em metros.
+  private async applyRadiusFilter(
+    providers: ProviderWithCalculatedRating[],
+    baseLat?: number,
+    baseLon?: number,
+  ): Promise<ProviderWithCalculatedRating[]> {
+    if (baseLat === undefined || baseLon === undefined) return providers;
+    const filtered: ProviderWithCalculatedRating[] = [];
+
+    // Busca radii em paralelo para os provedores com distance conhecido
+    const radii = await Promise.all(
+      providers.map(p => this.settingsService.getProviderRadiusKm(p.id, 15)),
+    );
+
+    providers.forEach((p, idx) => {
+      let distance = p.distance;
+      if (distance === undefined && p.address?.latitude != null && p.address?.longitude != null) {
+        distance = this.calculateDistanceMeters(baseLat, baseLon, p.address.latitude, p.address.longitude);
+      }
+      if (distance === undefined) {
+        // Sem distância calculada, mantemos para não esconder resultado inesperadamente
+        filtered.push(p);
+        return;
+      }
+      const radiusMeters = (radii[idx] ?? 15) * 1000;
+      if (distance <= radiusMeters) {
+        filtered.push(p);
+      }
+    });
+
+    return filtered;
   }
 
   private async updateAddressLocationPoint(addressId: string, latitude?: number, longitude?: number) {
@@ -1000,6 +1035,9 @@ export class ProvidersService {
     }
 
     if (providersWithDistance.length > 0) {
+      // Filtra pelo raio salvo do provedor (serviceRadiusKm) se cliente forneceu lat/lon
+      providersWithDistance = await this.applyRadiusFilter(providersWithDistance, latitude, longitude);
+
       if (minRating !== undefined) {
         providersWithDistance = providersWithDistance.filter(p => p.averageRating >= minRating);
       }
@@ -1066,7 +1104,8 @@ export class ProvidersService {
       return mapped;
     }));
 
-    let filteredProviders = providersWithCalculatedRating;
+    // Filtra pelo raio salvo do provedor (serviceRadiusKm) se cliente forneceu lat/lon
+    let filteredProviders = await this.applyRadiusFilter(providersWithCalculatedRating, latitude, longitude);
 
     if (minRating !== undefined) {
       filteredProviders = filteredProviders.filter(p => p.averageRating >= minRating);
@@ -1344,9 +1383,12 @@ export class ProvidersService {
       return mapped;
     }));
 
-    await this.cacheService.set(cacheKey, providersWithCalculatedRating);
+    // Filtra pelo raio salvo do provedor (serviceRadiusKm) se cliente forneceu lat/lon
+    const radiusFiltered = await this.applyRadiusFilter(providersWithCalculatedRating, latitude, longitude);
+
+    await this.cacheService.set(cacheKey, radiusFiltered);
     this.logger.log(`[ProvidersService] findTopRatedOrExperiencedProviders: Resultados adicionados ao cache.`);
-    return providersWithCalculatedRating;
+    return radiusFiltered;
   }
 
   // NEW: Logic to assign/update badges
