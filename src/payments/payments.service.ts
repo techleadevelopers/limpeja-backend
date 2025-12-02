@@ -382,22 +382,50 @@ export class PaymentsService {
       idempotencyKey: idemKey,
     });
 
+    const fetchFn: any = (global as any).fetch;
+    if (!fetchFn) {
+      throw new InternalServerErrorException(
+        'fetch indisponível no runtime do servidor.',
+      );
+    }
+
     let respData: any;
     try {
-      const response = await axios.post(url, payload, {
+      const response = await fetchFn(url, {
+        method: 'POST',
         headers: {
           Authorization: `Bearer ${apiToken}`,
           'Content-Type': 'application/json',
           'idempotency-key': idemKey,
         },
-        httpsAgent: this.pagseguroHttpsAgent,
-        timeout: 15000,
+        body: JSON.stringify(payload),
+        // Node fetch aceita agent para mTLS/CA customizado
+        agent: this.pagseguroHttpsAgent,
       });
-      respData = response.data;
+
+      const text = await response.text();
+      try {
+        respData = JSON.parse(text);
+      } catch {
+        this.logger.error({
+          msg: 'PagBank ORDER PIX ERROR - JSON parse',
+          response: text,
+        });
+        throw new InternalServerErrorException('Resposta inválida do PagBank.');
+      }
+
+      if (!response.ok) {
+        this.logger.error({
+          msg: 'PagBank ORDER PIX ERROR',
+          status: response.status,
+          response: respData,
+        });
+        throw new BadRequestException('Falha ao criar PIX no PagBank.');
+      }
     } catch (err: any) {
       this.logger.error({
         msg: 'PagBank ORDER PIX ERROR',
-        response: err?.response?.data,
+        response: err?.response?.data ?? err?.message,
       });
       throw new BadRequestException('Falha ao criar PIX no PagBank.');
     } // === 5. MAPEAR RESPOSTA REAL DO PAGBANK ===
@@ -584,6 +612,64 @@ export class PaymentsService {
     } else {
       this.logger.debug(`PIX webhook replay ${eventId} ignored.`);
       return { message: 'ok' };
+    }
+
+    // === PagBank Orders (qr_codes) ===
+    const orderId = webhookData?.id as string | undefined;
+    const qr = webhookData?.qr_codes?.[0];
+    if (orderId && qr) {
+      const qrStatus = (qr.status ?? '').toString().toUpperCase();
+      let intentNewStatus: PaymentIntentStatus | undefined =
+        PaymentIntentStatus.PENDING;
+      let bookingNewStatus: BookingStatus | undefined;
+
+      if (qrStatus === 'PAID') {
+        intentNewStatus = PaymentIntentStatus.PAID;
+        bookingNewStatus = BookingStatus.CONFIRMED;
+      } else if (qrStatus === 'EXPIRED') {
+        intentNewStatus = PaymentIntentStatus.EXPIRED;
+        bookingNewStatus = BookingStatus.CANCELED;
+      }
+
+      const intent = await this.prisma.paymentIntent.findFirst({
+        where: {
+          OR: [
+            { externalOrderId: orderId },
+            qr?.id ? { externalQrCodeId: qr.id as string } : undefined,
+          ].filter(Boolean) as any,
+        },
+      });
+
+      if (!intent) {
+        this.logger.warn(
+          `[PaymentsService] PaymentIntent não encontrado para orderId=${orderId} qrId=${qr?.id}`,
+        );
+        return { message: 'PaymentIntent not found for order webhook' };
+      }
+
+      if (intentNewStatus) {
+        await this.prisma.paymentIntent.update({
+          where: { id: intent.id },
+          data: { status: intentNewStatus },
+        });
+        await this.prisma.paymentEvent.create({
+          data: {
+            paymentIntentId: intent.id,
+            type: `webhook:order:${qrStatus || 'UNKNOWN'}`,
+            payload: webhookData,
+          },
+        });
+      }
+
+      if (intent.bookingId && bookingNewStatus) {
+        await this.bookingsService.updateStatus(
+          intent.bookingId,
+          bookingNewStatus,
+          UserRole.ADMIN,
+        );
+      }
+
+      return { message: `Webhook processed for order ${orderId}.` };
     }
 
     const transactionId = webhookData.transactionId as string;
