@@ -245,6 +245,46 @@ export class BookingDetailsDto {
   @IsString()
   scheduledDateTime?: string;
 
+  @ApiPropertyOptional({
+    description: 'Instante agendado combinado (ISO) já em timezone do backend',
+    example: '2025-07-01T09:00:00.000Z',
+  })
+  @IsOptional()
+  @IsString()
+  scheduledStart?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Duração do serviço em minutos',
+    example: 120,
+  })
+  @IsOptional()
+  @IsNumber()
+  durationMinutes?: number | null;
+
+  @ApiPropertyOptional({
+    description: 'Horário real de início (se iniciado)',
+    example: '2025-07-01T09:05:00.000Z',
+  })
+  @IsOptional()
+  @IsString()
+  startedAt?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Horário real de conclusão (se finalizado)',
+    example: '2025-07-01T13:05:00.000Z',
+  })
+  @IsOptional()
+  @IsString()
+  completedAt?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Horário estimado de término (calculado)',
+    example: '2025-07-01T13:00:00.000Z',
+  })
+  @IsOptional()
+  @IsString()
+  scheduledEndTime?: string | null;
+
   constructor(data: {
     id: string;
     clientId: string;
@@ -252,6 +292,10 @@ export class BookingDetailsDto {
     providerServiceId: string;
     scheduledDate: Date | string;
     scheduledTime: string;
+    scheduledStart?: Date | string | null;
+    durationMinutes?: number | null;
+    startedAt?: Date | string | null;
+    completedAt?: Date | string | null;
     status: BookingStatus;
     totalPrice: Decimal | number;
     notes?: string | null;
@@ -304,6 +348,23 @@ export class BookingDetailsDto {
         : data.scheduledDate.split('T')[0];
     this.scheduledTime = data.scheduledTime;
     this.status = data.status;
+    this.scheduledStart = data.scheduledStart
+      ? data.scheduledStart instanceof Date
+        ? data.scheduledStart.toISOString()
+        : data.scheduledStart
+      : null;
+    this.durationMinutes =
+      data.durationMinutes !== undefined ? data.durationMinutes : null;
+    this.startedAt = data.startedAt
+      ? data.startedAt instanceof Date
+        ? data.startedAt.toISOString()
+        : data.startedAt
+      : null;
+    this.completedAt = data.completedAt
+      ? data.completedAt instanceof Date
+        ? data.completedAt.toISOString()
+        : data.completedAt
+      : null;
 
     this.totalPrice = isDecimal(data.totalPrice)
       ? data.totalPrice.toNumber()
@@ -378,5 +439,18 @@ export class BookingDetailsDto {
     }
 
     this.scheduledDateTime = `${this.scheduledDate}T${this.scheduledTime}:00Z`;
+    // Estimativa de término: usa startedAt se houver, senão scheduledStart/durationMinutes
+    const baseEnd = this.startedAt
+      ? new Date(this.startedAt)
+      : this.scheduledStart
+        ? new Date(this.scheduledStart)
+        : new Date(this.scheduledDateTime);
+    const dur = this.durationMinutes ?? this.serviceDurationMinutes ?? null;
+    if (baseEnd instanceof Date && !Number.isNaN(baseEnd.getTime()) && dur) {
+      const end = new Date(baseEnd.getTime() + dur * 60000);
+      this.scheduledEndTime = end.toISOString();
+    } else {
+      this.scheduledEndTime = null;
+    }
   }
 }

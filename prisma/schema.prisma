@@ -462,12 +462,15 @@ model Booking {
   providerService           ProviderService @relation(fields: [providerServiceId], references: [id])
   scheduledDate             DateTime
   scheduledTime             String
+  scheduledStart            DateTime?
+  durationMinutes           Int?
   status                    BookingStatus @default(PENDING)
   totalPrice                Decimal       @db.Decimal(10, 2)
   notes                     String?
   createdAt                 DateTime      @default(now())
   updatedAt                 DateTime      @updatedAt
   review                    Review?
+  isReviewed                Boolean       @default(false)
   transactions              Transaction[]
   addressId                 String?       @unique  // 1:1 com Address; confirme se atende fluxos (sem endereços compartilhados)
   address                   Address?      @relation("BookingAddress", fields: [addressId], references: [id])

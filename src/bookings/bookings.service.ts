@@ -97,6 +97,15 @@ export class BookingsService {
     // private readonly bookingStateMachine: BookingStateMachine, // NOVO: Injetar BookingStateMachine (se for usar)
   ) {}
 
+  private getExpectedEnd(booking: Booking): Date {
+    const base =
+      booking.startedAt ||
+      booking.scheduledStart ||
+      this.getScheduledAtInSaoPaulo(booking.scheduledDate, booking.scheduledTime);
+    const dur = booking.durationMinutes ?? 60;
+    return new Date(base.getTime() + dur * 60 * 1000);
+  }
+
   /**
    * Resolve a Date that represents the given ISO string in the provided timezone.
    * Mirrors the approach used in PricingService to avoid adding new deps.
@@ -394,6 +403,14 @@ export class BookingsService {
             providerServiceId: providerService.id,
             scheduledDate: new Date(createBookingDto.scheduledDate),
             scheduledTime: createBookingDto.scheduledTime,
+            scheduledStart: this.getScheduledAtInSaoPaulo(
+              createBookingDto.scheduledDate,
+              createBookingDto.scheduledTime,
+            ),
+            durationMinutes:
+              createBookingDto.requestedDurationMinutes ||
+              providerService.durationMinutes ||
+              60,
             totalPrice: calculatedTotalPrice,
             notes: createBookingDto.notes,
             status: BookingStatus.PENDING,
@@ -1417,6 +1434,115 @@ export class BookingsService {
       canChat: !!activeBooking,
       bookingId: activeBooking?.id,
     };
+  }
+
+  async canReview(bookingId: string, userId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        client: true,
+        provider: { include: { user: true } },
+        paymentIntent: true,
+        review: true,
+      },
+    });
+    if (!booking) return { canReview: false, reason: 'not_found' };
+    if (booking.client?.userId !== userId)
+      return { canReview: false, reason: 'forbidden' };
+    if (booking.status !== BookingStatus.COMPLETED)
+      return { canReview: false, reason: 'not_completed' };
+    const expectedEnd = booking.completedAt ?? this.getExpectedEnd(booking);
+    if (new Date() < expectedEnd)
+      return { canReview: false, reason: 'too_early' };
+    if (booking.paymentIntent?.status !== 'PAID')
+      return { canReview: false, reason: 'unpaid' };
+    const existingReviewId: string | undefined =
+      (booking as any).reviewId ?? booking.review?.id;
+    if (booking.isReviewed || existingReviewId)
+      return { canReview: false, reason: 'already_reviewed' };
+
+    return {
+      canReview: true,
+      bookingId,
+      providerId: booking.providerId,
+      providerName: booking.provider?.user?.fullName,
+      providerAvatar: booking.provider?.user?.avatarUrl,
+    };
+  }
+
+  async startService(bookingId: string, providerUserId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: { provider: true, paymentIntent: true },
+    });
+    if (!booking) throw new NotFoundException('Agendamento não encontrado.');
+    if (booking.provider.userId !== providerUserId)
+      throw new ForbiddenException('Somente o prestador pode iniciar.');
+    if (booking.status !== BookingStatus.CONFIRMED)
+      throw new BadRequestException('Status inválido para iniciar.');
+    if (booking.paymentIntent?.status !== 'PAID')
+      throw new BadRequestException('Pagamento não confirmado.');
+
+    const scheduledStart =
+      booking.scheduledStart ||
+      this.getScheduledAtInSaoPaulo(
+        booking.scheduledDate,
+        booking.scheduledTime,
+      );
+    const now = new Date();
+    const diffMs = now.getTime() - scheduledStart.getTime();
+    const windowMs = 15 * 60 * 1000;
+    if (diffMs < -windowMs || diffMs > windowMs) {
+      throw new BadRequestException('Fora da janela de início (±15min).');
+    }
+
+    return this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        startedAt: now,
+        status: BookingStatus.IN_PROGRESS,
+        startedByUserId: providerUserId,
+      },
+      include: {
+        client: { include: { user: true } },
+        provider: { include: { user: true } },
+        providerService: { include: { service: true } },
+        paymentIntent: true,
+      },
+    });
+  }
+
+  async completeService(bookingId: string, providerUserId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: { provider: true, paymentIntent: true },
+    });
+    if (!booking) throw new NotFoundException('Agendamento não encontrado.');
+    if (booking.provider.userId !== providerUserId)
+      throw new ForbiddenException('Somente o prestador pode concluir.');
+    if (booking.status !== BookingStatus.IN_PROGRESS)
+      throw new BadRequestException('Status inválido para concluir.');
+    if (booking.paymentIntent?.status !== 'PAID')
+      throw new BadRequestException('Pagamento não confirmado.');
+
+    const expectedEnd = this.getExpectedEnd(booking);
+    if (new Date() < expectedEnd)
+      throw new BadRequestException('Ainda não atingiu o horário final.');
+
+    return this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        completedAt: new Date(),
+        status: BookingStatus.COMPLETED,
+        completedByUserId: providerUserId,
+      },
+      include: {
+        client: { include: { user: true } },
+        provider: { include: { user: true } },
+        providerService: { include: { service: true } },
+        paymentIntent: true,
+      },
+    });
   }
 
   async reportIssue(

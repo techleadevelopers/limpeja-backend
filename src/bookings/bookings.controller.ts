@@ -480,4 +480,35 @@ export class BookingsController {
     );
     return new BookingDetailsDto(updatedBooking);
   }
+
+  @Post(':id/start')
+  @Roles(UserRole.PROVIDER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Iniciar o serviço (prestador)' })
+  async start(@Req() req: Request, @Param('id') id: string) {
+    const userId = req.user['userId'];
+    const booking = await this.bookingsService.startService(id, userId);
+    return new BookingDetailsDto(booking);
+  }
+
+  @Post(':id/complete')
+  @Roles(UserRole.PROVIDER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Concluir o serviço (prestador)' })
+  async complete(@Req() req: Request, @Param('id') id: string) {
+    const userId = req.user['userId'];
+    const booking = await this.bookingsService.completeService(id, userId);
+    return new BookingDetailsDto(booking);
+  }
+
+  @Get(':id/can-review')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verifica se o cliente pode avaliar este booking' })
+  async canReview(@Req() req: Request, @Param('id') id: string) {
+    const userId = req.user['userId'];
+    return this.bookingsService.canReview(id, userId);
+  }
 }
