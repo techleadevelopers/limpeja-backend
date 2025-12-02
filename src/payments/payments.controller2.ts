@@ -335,4 +335,49 @@ export class PaymentsController {
     if (role !== 'ADMIN') throw new InternalServerErrorException('Admin only');
     return this.paymentsService.rejectWithdrawal(id, body?.reason);
   }
+
+  @Post('test-orders')
+  @HttpCode(HttpStatus.OK)
+  async testOrdersDirect() {
+    const payload = {
+      reference_id: 'test-orders-1',
+      customer: {
+        name: 'Rodrigo Silva',
+        email: 'rods@gmail.com',
+        tax_id: '39450038813',
+      },
+      items: [{ name: 'Teste Orders', quantity: 1, unit_amount: 500 }],
+      qr_codes: [
+        {
+          amount: { value: 500 },
+          expiration_date: new Date(Date.now() + 300000).toISOString(),
+          instructions: 'Teste Orders',
+        },
+      ],
+    };
+
+    const fetchFn: any = (global as any).fetch;
+    if (!fetchFn) {
+      throw new InternalServerErrorException(
+        'fetch indisponível no runtime do servidor.',
+      );
+    }
+
+    const resp = await fetchFn('https://api.pagseguro.com/orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.PAGSEGURO_API_TOKEN}`,
+        'idempotency-key': 'test-orders-1',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await resp.text();
+
+    return {
+      status: resp.status,
+      response: text,
+    };
+  }
 }
