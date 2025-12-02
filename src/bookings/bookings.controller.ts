@@ -503,6 +503,18 @@ export class BookingsController {
     return new BookingDetailsDto(booking);
   }
 
+  @Post('auto-complete-overdue')
+  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Auto-completar bookings IN_PROGRESS cujo horário final já passou e estão pagos',
+  })
+  async autoCompleteOverdue() {
+    return this.bookingsService.autoCompleteOverdueBookings();
+  }
+
   @Get(':id/can-review')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

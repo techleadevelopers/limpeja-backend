@@ -16,6 +16,7 @@ import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import {
   Booking,
   BookingStatus,
+  PaymentIntentStatus,
   UserRole,
   Prisma,
   CouponType,
@@ -29,6 +30,7 @@ import {
 } from '../providers/providers.service';
 import { ProviderServicesService } from '../provider-services/provider-services.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PixChargeResponseDto } from '../payments/dto/create-pix-charge.dto';
 import { BookingAndPixResponseDto } from './dto/booking-and-pix-response.dto';
 import { PaymentsService } from '../payments/payments.service';
@@ -1543,6 +1545,61 @@ export class BookingsService {
         paymentIntent: true,
       },
     });
+  }
+
+  /**
+   * Auto-completa agendamentos IN_PROGRESS cujo horário esperado já passou
+   * e que estão pagos (PaymentIntent = PAID). Evita completar se reembolsado/chargeback.
+   */
+  async autoCompleteOverdueBookings() {
+    const now = new Date();
+    const inProgress = await this.prisma.booking.findMany({
+      where: { status: BookingStatus.IN_PROGRESS },
+      include: { paymentIntent: true },
+    });
+
+    const toComplete = inProgress.filter((b) => {
+      const expectedEnd = this.getExpectedEnd(b as any);
+      const payStatus = b.paymentIntent?.status as
+        | PaymentIntentStatus
+        | undefined;
+      const paidOk = payStatus === PaymentIntentStatus.PAID;
+      const notRefunded =
+        payStatus !== PaymentIntentStatus.REFUNDED &&
+        payStatus !== PaymentIntentStatus.CHARGEBACK;
+      return expectedEnd && expectedEnd <= now && paidOk && notRefunded;
+    });
+
+    for (const b of toComplete) {
+      const expectedEnd = this.getExpectedEnd(b as any);
+      await this.prisma.booking.update({
+        where: { id: b.id },
+        data: {
+          status: BookingStatus.COMPLETED,
+          completedAt: expectedEnd ?? now,
+        },
+      });
+      this.logger.log(
+        `[BookingsService] autoCompleteOverdueBookings: booking ${b.id} marcado como COMPLETED automaticamente.`,
+      );
+    }
+
+    return { completed: toComplete.map((b) => b.id) };
+  }
+
+  /**
+   * Cron job (1/min) para auto-completar bookings IN_PROGRESS cujo horário final passou.
+   * Requer que ScheduleModule esteja importado no AppModule.
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async cronAutoCompleteOverdue() {
+    try {
+      await this.autoCompleteOverdueBookings();
+    } catch (e: any) {
+      this.logger.warn(
+        `[BookingsService] cronAutoCompleteOverdue falhou: ${e?.message || e}`,
+      );
+    }
   }
 
   async reportIssue(
