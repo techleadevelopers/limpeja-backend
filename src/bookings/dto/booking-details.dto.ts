@@ -9,7 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { BookingStatus } from '@prisma/client';
+import { BookingStatus, PaymentIntentStatus } from '@prisma/client';
 import { AddressDetailsDto } from '../../common/dto/address-details.dto';
 import { Decimal } from '@prisma/client/runtime/library';
 
@@ -62,6 +62,14 @@ export class BookingDetailsDto {
   @IsString()
   @IsEnum(BookingStatus)
   status: BookingStatus;
+
+  @ApiPropertyOptional({
+    description: 'Status do agendamento (PT-BR, amigável ao usuário)',
+    example: 'Confirmado',
+  })
+  @IsOptional()
+  @IsString()
+  statusLabel?: string;
 
   @ApiProperty({ description: 'Preço total do serviço', example: 120.5 })
   @IsNumber()
@@ -285,6 +293,22 @@ export class BookingDetailsDto {
   @IsString()
   scheduledEndTime?: string | null;
 
+  @ApiPropertyOptional({
+    description: 'Status do pagamento (enum PaymentIntentStatus)',
+    example: PaymentIntentStatus.PAID,
+  })
+  @IsOptional()
+  @IsString()
+  paymentStatus?: PaymentIntentStatus | null;
+
+  @ApiPropertyOptional({
+    description: 'Status do pagamento (PT-BR, amigável ao usuário)',
+    example: 'Pago',
+  })
+  @IsOptional()
+  @IsString()
+  paymentStatusLabel?: string | null;
+
   constructor(data: {
     id: string;
     clientId: string;
@@ -337,7 +361,29 @@ export class BookingDetailsDto {
       durationMinutes: number;
       description?: string | null;
     };
+    paymentIntent?: {
+      status?: PaymentIntentStatus;
+    } | null;
   }) {
+    const statusLabelMap: Record<string, string> = {
+      PENDING: 'Pendente',
+      CONFIRMED: 'Confirmado',
+      IN_PROGRESS: 'Em andamento',
+      COMPLETED: 'Concluído',
+      CANCELED: 'Cancelado',
+      RESCHEDULED: 'Reagendado',
+      PENDING_DISPUTE: 'Em disputa',
+      REJECTED: 'Recusado',
+      NO_SHOW: 'Não compareceu',
+    };
+    const paymentLabelMap: Record<string, string> = {
+      PENDING: 'Pendente',
+      PAID: 'Pago',
+      EXPIRED: 'Expirado',
+      REFUNDED: 'Reembolsado',
+      CHARGEBACK: 'Chargeback',
+    };
+
     this.id = data.id;
     this.clientId = data.clientId;
     this.providerId = data.providerId;
@@ -348,6 +394,7 @@ export class BookingDetailsDto {
         : data.scheduledDate.split('T')[0];
     this.scheduledTime = data.scheduledTime;
     this.status = data.status;
+    this.statusLabel = statusLabelMap[data.status] || data.status;
     this.scheduledStart = data.scheduledStart
       ? data.scheduledStart instanceof Date
         ? data.scheduledStart.toISOString()
@@ -421,6 +468,13 @@ export class BookingDetailsDto {
       this.providerServiceDescription =
         data.providerService.description ?? null;
     }
+
+    // Payment labels (se paymentIntent vier no include)
+    const payStatus = data.paymentIntent?.status;
+    this.paymentStatus = payStatus ?? null;
+    this.paymentStatusLabel = payStatus
+      ? paymentLabelMap[payStatus] || payStatus
+      : null;
 
     // Review mapping
     if (data.review) {

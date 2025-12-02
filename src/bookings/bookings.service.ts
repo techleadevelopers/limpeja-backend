@@ -1475,7 +1475,11 @@ export class BookingsService {
   async startService(bookingId: string, providerUserId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { provider: true, paymentIntent: true },
+      include: {
+        provider: { include: { user: true } },
+        client: { include: { user: true } },
+        paymentIntent: true,
+      },
     });
     if (!booking) throw new NotFoundException('Agendamento não encontrado.');
     if (booking.provider.userId !== providerUserId)
@@ -1531,7 +1535,7 @@ export class BookingsService {
     if (new Date() < expectedEnd)
       throw new BadRequestException('Ainda não atingiu o horário final.');
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: {
         completedAt: new Date(),
@@ -1545,6 +1549,37 @@ export class BookingsService {
         paymentIntent: true,
       },
     });
+
+    try {
+      if (updated.client?.userId) {
+        await this.queuesService.addNotificationJob('send-notification', {
+          userId: updated.client.userId,
+          kind: 'booking_completed',
+          title: 'Serviço concluído',
+          body: `Seu atendimento com ${updated.provider?.user?.fullName || 'prestador'} foi concluído.`,
+          deeplink: `/(client)/bookings/${updated.id}`,
+          priority: 1,
+          idempotencyKey: `notif:booking_completed:client:${updated.id}`,
+        });
+      }
+      if (updated.provider?.userId) {
+        await this.queuesService.addNotificationJob('send-notification', {
+          userId: updated.provider.userId,
+          kind: 'booking_completed',
+          title: 'Serviço concluído',
+          body: `Atendimento ${updated.id} marcado como concluído.`,
+          deeplink: `/(provider)/active-booking/${updated.id}`,
+          priority: 1,
+          idempotencyKey: `notif:booking_completed:provider:${updated.id}`,
+        });
+      }
+    } catch (e) {
+      this.logger.warn(
+        `[BookingsService] Falha ao notificar conclusão do booking ${updated.id}: ${e?.message || e}`,
+      );
+    }
+
+    return updated;
   }
 
   /**
@@ -1572,16 +1607,52 @@ export class BookingsService {
 
     for (const b of toComplete) {
       const expectedEnd = this.getExpectedEnd(b as any);
-      await this.prisma.booking.update({
+      const updated = await this.prisma.booking.update({
         where: { id: b.id },
         data: {
           status: BookingStatus.COMPLETED,
           completedAt: expectedEnd ?? now,
         },
+        include: {
+          client: { include: { user: true } },
+          provider: { include: { user: true } },
+          providerService: { include: { service: true } },
+          paymentIntent: true,
+        },
       });
       this.logger.log(
         `[BookingsService] autoCompleteOverdueBookings: booking ${b.id} marcado como COMPLETED automaticamente.`,
       );
+
+      // Notificar cliente e prestador na conclusão automática
+      try {
+        if ((updated as any).client?.userId) {
+          await this.queuesService.addNotificationJob('send-notification', {
+            userId: (updated as any).client.userId,
+            kind: 'booking_completed',
+            title: 'Serviço concluído',
+            body: `Seu atendimento com ${(updated as any).provider?.user?.fullName || 'prestador'} foi concluído.`,
+            deeplink: `/(client)/bookings/${updated.id}`,
+            priority: 1,
+            idempotencyKey: `notif:booking_completed:client:${updated.id}`,
+          });
+        }
+        if ((updated as any).provider?.userId) {
+          await this.queuesService.addNotificationJob('send-notification', {
+            userId: (updated as any).provider.userId,
+            kind: 'booking_completed',
+            title: 'Serviço concluído',
+            body: `Atendimento ${updated.id} marcado como concluído.`,
+            deeplink: `/(provider)/active-booking/${updated.id}`,
+            priority: 1,
+            idempotencyKey: `notif:booking_completed:provider:${updated.id}`,
+          });
+        }
+      } catch (e) {
+        this.logger.warn(
+          `[BookingsService] Falha ao notificar conclusão automática do booking ${updated.id}: ${e?.message || e}`,
+        );
+      }
     }
 
     return { completed: toComplete.map((b) => b.id) };
