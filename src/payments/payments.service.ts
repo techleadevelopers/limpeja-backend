@@ -1,6 +1,4 @@
-﻿// src/payments/payments.service.ts
-
-import {
+﻿import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
@@ -449,7 +447,8 @@ export class PaymentsService {
           instructions: description ?? 'Pagamento PIX LimpeJá',
         },
       ],
-      // notification_urls: [`${this.appBaseUrl}/payments/webhook/pagbank`],
+      // 🛑 USE ESTA LINHA CORRIGIDA (Descomentada e corrigida para 'pix')
+      notification_urls: [`${this.appBaseUrl}/payments/webhook/pix`],
     }; // === 4. CHAMAR PAGSEGURO ORDER API ===
 
     const url = `${pagseguroBase}/orders`;
@@ -528,6 +527,9 @@ export class PaymentsService {
       if (png) qrCodeImageUrl = png.href;
     }
 
+    // compat variable for DB column expected by Prisma
+    const qrCodeUrl = qrCodeImageUrl;
+
     const expirationDateStr: string | undefined = qr.expiration_date;
     const expiresAt =
       expirationDateStr && expirationDateStr.length > 0
@@ -544,7 +546,7 @@ export class PaymentsService {
         externalChargeId: chargeId,
         externalQrCodeId: qrCodeId,
         qrCodeText,
-        qrCodeUrl: qrCodeImageUrl,
+        qrCodeUrl,
         expiresAt,
         status,
         idempotencyKey: idemKey,
@@ -555,7 +557,7 @@ export class PaymentsService {
         externalChargeId: chargeId,
         externalQrCodeId: qrCodeId,
         qrCodeText,
-        qrCodeUrl: qrCodeImageUrl,
+        qrCodeUrl,
         expiresAt,
         status,
         idempotencyKey: idemKey,
