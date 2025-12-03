@@ -85,7 +85,7 @@ export class PixChargeResponseDto {
 
   @ApiProperty({
     description: 'URL da imagem do QR Code PIX',
-    example: 'https://sandbox.api.pagseguro.com/qrcode/...',
+    example: 'https://api.pagseguro.com/qrcode/...',
   })
   @IsString()
   @IsNotEmpty()

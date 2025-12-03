@@ -1,4 +1,4 @@
-// src/payments/payments.controller2.ts
+// src/payments/payments.controller.ts
 
 import {
   Controller,
@@ -20,7 +20,8 @@ import {
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
-} from '@nestjs/swagger';
+}
+from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
 import {
   CreatePixChargeDto,
@@ -216,6 +217,12 @@ export class PaymentsController {
     @Body() webhookData: any,
     @Req() req: Request,
   ): Promise<MessageResponseDto> {
+    // 🛑 ESTE LOG DEVE SER O PRIMEIRO NO SEU CONTROLLER
+    this.logger.log(
+      `[WEBHOOK PIX - PORTA DE ENTRADA] Tentativa de acesso. EventID: ${eventId}.`,
+    );
+
+    // O restante do código, que chama o Service, segue aqui
     this.logger.log('[PaymentsController] handlePixWebhook: recebido.');
     this.logger.debug(
       `[PaymentsController] handlePixWebhook: payload=${JSON.stringify(webhookData)}`,

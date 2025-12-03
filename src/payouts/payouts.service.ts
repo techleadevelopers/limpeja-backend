@@ -86,7 +86,7 @@ export class PayoutsService {
       ) || 0;
     this.pspBaseUrl = this.configService.get<string>(
       'PAGSEGURO_API_BASE_URL',
-      'https://sandbox.api.pagseguro.com',
+      'https://api.pagseguro.com',
     );
     this.pspToken =
       this.configService.get<string>('PAGSEGURO_API_TOKEN') || undefined;

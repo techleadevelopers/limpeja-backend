@@ -60,7 +60,7 @@ export class PaymentsService {
       this.configService.get<string>('PAGSEGURO_API_TOKEN') || undefined;
     this.pagseguroApiBaseUrl = this.configService.get<string>(
       'PAGSEGURO_API_BASE_URL',
-      'https://sandbox.api.pagseguro.com',
+      'https://api.pagseguro.com',
     );
     this.appBaseUrl =
       this.configService.get<string>('API_BASE_URL') || undefined;
