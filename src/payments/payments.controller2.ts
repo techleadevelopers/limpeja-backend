@@ -203,8 +203,8 @@ export class PaymentsController {
     description: 'Webhook recebido e processado.',
   })
   async handlePixWebhook(
-    @Body() webhookData: any, // Corpo da requisição com os dados do webhook
-    @Req() req: Request,
+    @Body() webhookData: any, // Corpo da requisição com os dados do webhook (pode ser falho)
+    @Req() req: Request, // Acessamos o objeto de Requisição completo para obter o raw body
   ): Promise<MessageResponseDto> {
     
     this.logger.log(
@@ -212,12 +212,15 @@ export class PaymentsController {
     );
 
     try {
-      // Chamando o service sem eventId, signature ou rawBody, garantindo undefined.
+      // ✅ CORREÇÃO: Acessa o rawBody (Buffer), que deve ter sido anexado pelo middleware
+      const rawBody = (req as any).rawBody;
+
+      // Chamando o service, passando o rawBody para que ele possa processar o dado bruto se necessário.
       return await this.paymentsService.handlePixWebhook(
         undefined, // signature
         undefined, // eventId
         webhookData,
-        undefined, // rawBody
+        rawBody instanceof Buffer ? rawBody : undefined, // Passa o Buffer bruto se ele for um Buffer
       );
     } catch (error: any) {
       this.logger.error(
