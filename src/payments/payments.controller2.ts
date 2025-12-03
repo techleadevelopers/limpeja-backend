@@ -20,8 +20,7 @@ import {
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
-}
-from '@nestjs/swagger';
+} from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
 import {
   CreatePixChargeDto,
@@ -34,6 +33,9 @@ import { Request } from 'express';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { UserRole } from '@prisma/client';
 
+/**
+ * Interface para o payload do usuário autenticado, geralmente vindo do token JWT.
+ */
 interface RequestUserPayload {
   userId: string;
   email: string;
@@ -42,18 +44,21 @@ interface RequestUserPayload {
   providerId?: string;
 }
 
-@ApiTags('payments')
-@Controller('payments')
+@ApiTags('payments') // Tag para agrupar endpoints no Swagger UI
+@Controller('payments') // Define o prefixo de rota para este controlador
 export class PaymentsController {
-  private readonly logger = new Logger(PaymentsController.name);
+  private readonly logger = new Logger(PaymentsController.name); // Logger para registrar eventos e erros
 
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(private readonly paymentsService: PaymentsService) {} // Injeção de dependência do PaymentsService
 
-  // Cria uma cobrança PIX
+  /**
+   * Cria uma nova cobrança PIX para um serviço ou provedor.
+   * Apenas clientes autenticados podem gerar cobranças.
+   */
   @Post('pix-charge')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.OK)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard) // Protege o endpoint com autenticação JWT
+  @HttpCode(HttpStatus.OK) // Retorna status 200 OK em caso de sucesso
+  @ApiBearerAuth() // Indica que o endpoint requer um token Bearer para autenticação no Swagger UI
   @ApiOperation({
     summary: 'Cria uma nova cobrança PIX para um serviço ou provedor.',
     description:
@@ -77,8 +82,8 @@ export class PaymentsController {
     description: 'Provedor ou agendamento não encontrado.',
   })
   async createPixCharge(
-    @Req() req: Request,
-    @Body() createPixChargeDto: CreatePixChargeDto,
+    @Req() req: Request, // Acessa o objeto de requisição para obter dados do usuário
+    @Body() createPixChargeDto: CreatePixChargeDto, // Corpo da requisição com os dados para criar a cobrança
   ): Promise<PixChargeResponseDto> {
     const requestUser = req.user as RequestUserPayload;
     const clientUserId = requestUser.userId;
@@ -99,7 +104,12 @@ export class PaymentsController {
     );
   }
 
-  // Rota pública para receber notificações de pagamento do PSP
+  /**
+   * Rota pública para receber notificações de pagamento do PSP (Payment Service Provider).
+   * Este endpoint é genérico e pode ser usado para diferentes tipos de notificações de pagamento.
+   *
+   * NOTA: Este é um webhook genérico. Para PIX, você tem um webhook mais específico abaixo.
+   */
   @Post('webhook') // OU 'notification', 'payment-notification', etc.
   @HttpCode(HttpStatus.OK) // Responda 200/204 para o PSP imediatamente.
   @ApiOperation({ summary: 'Recebe notificações de PAGAMENTO (Compra) do PSP (Webhook)' })
@@ -111,10 +121,13 @@ export class PaymentsController {
     return this.paymentsService.handlePaymentWebhook(signature, payload);
   }
 
-  // Recupera PaymentIntent por booking
+  /**
+   * Recupera o PaymentIntent associado a um agendamento específico.
+   * Apenas usuários autorizados podem visualizar o PaymentIntent.
+   */
   @Get('intent/:bookingId')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard) // Protege o endpoint com autenticação JWT
+  @ApiBearerAuth() // Indica que o endpoint requer um token Bearer para autenticação no Swagger UI
   @ApiOperation({
     summary: 'Recupera o PaymentIntent associado a um agendamento',
   })
@@ -132,8 +145,8 @@ export class PaymentsController {
     description: 'PaymentIntent não encontrado.',
   })
   async getPaymentIntent(
-    @Req() req: Request,
-    @Param('bookingId') bookingId: string,
+    @Req() req: Request, // Acessa o objeto de requisição para obter dados do usuário
+    @Param('bookingId') bookingId: string, // Parâmetro de rota para o ID do agendamento
   ): Promise<PaymentIntentResponseDto> {
     const requestUser = req.user as RequestUserPayload;
     this.logger.log(
@@ -145,11 +158,14 @@ export class PaymentsController {
     );
   }
 
-  // Solicita saque via PIX (provedor)
+  /**
+   * Solicita um saque de valores disponíveis para um provedor via chave PIX.
+   * Apenas provedores autenticados podem solicitar saques.
+   */
   @Post('withdrawal')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.OK)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard) // Protege o endpoint com autenticação JWT
+  @HttpCode(HttpStatus.OK) // Retorna status 200 OK em caso de sucesso
+  @ApiBearerAuth() // Indica que o endpoint requer um token Bearer para autenticação no Swagger UI
   @ApiOperation({
     summary:
       'Solicita um saque de valores disponíveis para um provedor via chave PIX.',
@@ -172,9 +188,9 @@ export class PaymentsController {
     description: 'Provedor não encontrado.',
   })
   async requestWithdrawal(
-    @Req() req: Request,
-    @Body() requestWithdrawalDto: RequestWithdrawalDto,
-    @Headers('idempotency-key') idempotencyKey?: string,
+    @Req() req: Request, // Acessa o objeto de requisição para obter dados do usuário
+    @Body() requestWithdrawalDto: RequestWithdrawalDto, // Corpo da requisição com os dados do saque
+    @Headers('idempotency-key') idempotencyKey?: string, // Cabeçalho de idempotência opcional
   ) {
     const requestUser = req.user as RequestUserPayload;
     const providerId = requestUser.providerId;
@@ -200,9 +216,12 @@ export class PaymentsController {
     );
   }
 
-  // Webhook de PIX
+  /**
+   * Webhook de PIX para receber notificações de pagamento do PagBank.
+   * Este endpoint espera os cabeçalhos 'x-signature' e 'x-event-id' do PagBank.
+   */
   @Post('webhook/pix')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.OK) // Retorna status 200 OK para o PSP
   @ApiOperation({
     summary: 'Recebe notificações de webhook de pagamento PIX.',
     description: 'Chamado pelo PSP para notificar status de uma transação PIX.',
@@ -212,10 +231,10 @@ export class PaymentsController {
     description: 'Webhook recebido e processado.',
   })
   async handlePixWebhook(
-    @Headers('x-signature') signature: string,
-    @Headers('x-event-id') eventId: string,
-    @Body() webhookData: any,
-    @Req() req: Request,
+    @Headers('x-signature') signature: string, // Cabeçalho para verificação da assinatura do webhook
+    @Headers('x-event-id') eventId: string, // Cabeçalho com o ID do evento
+    @Body() webhookData: any, // Corpo da requisição com os dados do webhook
+    @Req() req: Request, // Objeto de requisição para acessar o rawBody
   ): Promise<MessageResponseDto> {
     // 🛑 ESTE LOG DEVE SER O PRIMEIRO NO SEU CONTROLLER
     this.logger.log(
@@ -228,6 +247,7 @@ export class PaymentsController {
       `[PaymentsController] handlePixWebhook: payload=${JSON.stringify(webhookData)}`,
     );
     try {
+      // O rawBody é necessário para verificar a assinatura do webhook, pois a assinatura é gerada sobre o corpo bruto.
       const rawBody: Buffer | undefined = (req as any)?.rawBody;
       return await this.paymentsService.handlePixWebhook(
         signature,
@@ -241,6 +261,7 @@ export class PaymentsController {
         error?.message,
         error?.stack,
       );
+      // Retorna uma mensagem de erro, mas ainda com status 200 OK para evitar que o PSP reenvie o webhook repetidamente.
       return {
         message:
           'Erro interno ao processar webhook PIX, mas o erro foi logado.',
@@ -248,18 +269,21 @@ export class PaymentsController {
     }
   }
 
-  // Webhook de saque/withdrawal
+  /**
+   * Webhook de saque/withdrawal para receber notificações do PSP sobre o status de saques.
+   * Este endpoint também espera os cabeçalhos 'x-signature' e 'x-event-id'.
+   */
   @Post('webhook/withdrawal')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.OK) // Retorna status 200 OK para o PSP
   @ApiOperation({ summary: 'Recebe notificações de webhook de saque.' })
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Webhook de saque recebido e processado.',
   })
   async handleWithdrawalWebhook(
-    @Headers('x-signature') signature: string,
-    @Headers('x-event-id') eventId: string,
-    @Body() payload: any,
+    @Headers('x-signature') signature: string, // Cabeçalho para verificação da assinatura do webhook
+    @Headers('x-event-id') eventId: string, // Cabeçalho com o ID do evento
+    @Body() payload: any, // Corpo da requisição com os dados do webhook
   ) {
     this.logger.log(
       '[PaymentsController] handleWithdrawalWebhook: received event from PSP.',
@@ -271,91 +295,119 @@ export class PaymentsController {
     );
   }
 
-  // ADMIN: Listar transações
+  /**
+   * ADMIN: Lista todas as transações.
+   * Apenas usuários com a função 'ADMIN' podem acessar este endpoint.
+   */
   @Get('transactions')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard) // Protege o endpoint com autenticação JWT
+  @ApiBearerAuth() // Indica que o endpoint requer um token Bearer para autenticação no Swagger UI
   @ApiOperation({ summary: 'Lista transações (admin)' })
   async listTransactions(@Req() req: any) {
     const role = req.user?.role;
-    if (role !== 'ADMIN') throw new InternalServerErrorException('Admin only');
-    const type = req.query?.type as string | undefined;
-    const status = req.query?.status as string | undefined;
+    if (role !== 'ADMIN')
+      throw new InternalServerErrorException('Admin only'); // Verifica a função do usuário
+    const type = req.query?.type as string | undefined; // Filtro opcional por tipo
+    const status = req.query?.status as string | undefined; // Filtro opcional por status
     return this.paymentsService.listTransactions(type, status);
   }
 
-  // ADMIN: Iniciar reembolso
+  /**
+   * ADMIN: Inicia o processo de reembolso para uma transação específica.
+   * Apenas usuários com a função 'ADMIN' podem acessar este endpoint.
+   */
   @Post(':transactionId/refund')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard) // Protege o endpoint com autenticação JWT
+  @ApiBearerAuth() // Indica que o endpoint requer um token Bearer para autenticação no Swagger UI
   @ApiOperation({ summary: 'Inicia reembolso (admin)' })
   async refund(
     @Req() req: any,
-    @Param('transactionId') transactionId: string,
-    @Body() body: { amount?: number },
+    @Param('transactionId') transactionId: string, // Parâmetro de rota para o ID da transação
+    @Body() body: { amount?: number }, // Corpo da requisição com o valor opcional para reembolso parcial
   ) {
     const role = req.user?.role;
-    if (role !== 'ADMIN') throw new InternalServerErrorException('Admin only');
+    if (role !== 'ADMIN')
+      throw new InternalServerErrorException('Admin only'); // Verifica a função do usuário
     return this.paymentsService.initiateRefund(transactionId, body?.amount);
   }
 
-  // ADMIN: Listar solicitações de saque
+  /**
+   * ADMIN: Lista todas as solicitações de saque.
+   * Apenas usuários com a função 'ADMIN' podem acessar este endpoint.
+   */
   @Get('withdrawals')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard) // Protege o endpoint com autenticação JWT
+  @ApiBearerAuth() // Indica que o endpoint requer um token Bearer para autenticação no Swagger UI
   @ApiOperation({ summary: 'Lista solicitações de saque (admin)' })
   async listWithdrawals(@Req() req: any) {
     const role = req.user?.role;
-    if (role !== 'ADMIN') throw new InternalServerErrorException('Admin only');
-    const status = req.query?.status as string | undefined;
+    if (role !== 'ADMIN')
+      throw new InternalServerErrorException('Admin only'); // Verifica a função do usuário
+    const status = req.query?.status as string | undefined; // Filtro opcional por status
     return this.paymentsService.listWithdrawals(status);
   }
 
-  // ADMIN: Registrar webhooks (PIX e Payouts)
+  /**
+   * ADMIN: Registra webhooks de PIX e Payouts no PagBank.
+   * Apenas usuários com a função 'ADMIN' podem acessar este endpoint.
+   */
   @Post('webhooks/register')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard) // Protege o endpoint com autenticação JWT
+  @ApiBearerAuth() // Indica que o endpoint requer um token Bearer para autenticação no Swagger UI
   @ApiOperation({
     summary: 'Registra webhooks de PIX e Payouts no PagBank (admin)',
   })
   async registerWebhooks(
     @Req() req: any,
-    @Body() body: { pixUrl?: string; payoutsUrl?: string },
+    @Body() body: { pixUrl?: string; payoutsUrl?: string }, // URLs opcionais para registro dos webhooks
   ) {
     const role = req.user?.role;
-    if (role !== 'ADMIN') throw new InternalServerErrorException('Admin only');
+    if (role !== 'ADMIN')
+      throw new InternalServerErrorException('Admin only'); // Verifica a função do usuário
     return this.paymentsService.registerAllWebhooks(
       body?.pixUrl,
       body?.payoutsUrl,
     );
   }
 
-  // ADMIN: Aprovar saque
+  /**
+   * ADMIN: Aprova uma solicitação de saque.
+   * Apenas usuários com a função 'ADMIN' podem acessar este endpoint.
+   */
   @Patch('withdrawals/:id/approve')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard) // Protege o endpoint com autenticação JWT
+  @ApiBearerAuth() // Indica que o endpoint requer um token Bearer para autenticação no Swagger UI
   @ApiOperation({ summary: 'Aprova solicitação de saque (admin)' })
   async approveWithdrawal(@Req() req: any, @Param('id') id: string) {
     const role = req.user?.role;
-    if (role !== 'ADMIN') throw new InternalServerErrorException('Admin only');
+    if (role !== 'ADMIN')
+      throw new InternalServerErrorException('Admin only'); // Verifica a função do usuário
     return this.paymentsService.approveWithdrawal(id);
   }
 
-  // ADMIN: Rejeitar saque
+  /**
+   * ADMIN: Rejeita uma solicitação de saque.
+   * Apenas usuários com a função 'ADMIN' podem acessar este endpoint.
+   */
   @Patch('withdrawals/:id/reject')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard) // Protege o endpoint com autenticação JWT
+  @ApiBearerAuth() // Indica que o endpoint requer um token Bearer para autenticação no Swagger UI
   @ApiOperation({ summary: 'Rejeita solicitação de saque (admin)' })
   async rejectWithdrawal(
     @Req() req: any,
     @Param('id') id: string,
-    @Body() body: { reason?: string },
+    @Body() body: { reason?: string }, // Corpo da requisição com o motivo da rejeição
   ) {
     const role = req.user?.role;
-    if (role !== 'ADMIN') throw new InternalServerErrorException('Admin only');
+    if (role !== 'ADMIN')
+      throw new InternalServerErrorException('Admin only'); // Verifica a função do usuário
     return this.paymentsService.rejectWithdrawal(id, body?.reason);
   }
 
+  /**
+   * Endpoint de teste para criar uma ordem de pagamento diretamente com o PagBank (Orders API).
+   * Útil para testar a integração da API de Orders.
+   */
   @Post('test-orders')
   @HttpCode(HttpStatus.OK)
   async testOrdersDirect() {
@@ -376,6 +428,7 @@ export class PaymentsController {
       ],
     };
 
+    // Verifica se a função fetch está disponível no ambiente de execução.
     const fetchFn: any = (global as any).fetch;
     if (!fetchFn) {
       throw new InternalServerErrorException(
@@ -383,17 +436,18 @@ export class PaymentsController {
       );
     }
 
+    // Faz a requisição para a API de Orders do PagBank.
     const resp = await fetchFn('https://api.pagseguro.com/orders', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.PAGSEGURO_API_TOKEN}`,
-        'idempotency-key': 'test-orders-1',
+        Authorization: `Bearer ${process.env.PAGSEGURO_API_TOKEN}`, // Token de autenticação do PagBank
+        'idempotency-key': 'test-orders-1', // Chave de idempotência para evitar processamento duplicado
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload), // Converte o payload para JSON
     });
 
-    const text = await resp.text();
+    const text = await resp.text(); // Lê a resposta como texto
 
     return {
       status: resp.status,

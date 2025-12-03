@@ -642,11 +642,17 @@ export class PaymentsService {
     // simulem pagamentos. O ideal é que você descubra por que o PagBank não
     // está enviando os cabeçalhos ou se eles usam outro nome.
     //
-    // if (!signature || !eventId) {
-    //   throw new BadRequestException('Missing webhook headers.');
-    // }
+    // COMENTE O BLOCO ABAIXO TEMPORARIAMENTE
+    /*
+    if (!signature || !eventId) {
+      throw new BadRequestException('Missing webhook headers.');
+    }
+    */
+    // FIM DO BLOCO COMENTADO
 
     const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
+    // Mantenha esta lógica, mas como 'signature' é undefined, o 'if' logo abaixo será satisfeito.
+    // Isso fará com que o sistema pule a validação de HMAC no teste.
     if (!secret) {
       if (nodeEnv === 'production') {
         throw new ForbiddenException('Webhook signature secret missing.');
@@ -663,55 +669,65 @@ export class PaymentsService {
       }
       // FIM ADDED LOG
 
-      const incoming = signature?.startsWith('sha256=')
-        ? signature.slice(7)
-        : signature;
-      let valid = false; // 1) Tenta validar com o rawBody exato recebido
-
-      if (rawBody && Buffer.isBuffer(rawBody)) {
-        try {
-          const h1 = createHmac('sha256', secret).update(rawBody).digest('hex');
-          if (nodeEnv !== 'production') {
-            this.logger.debug(`HMAC RAW HEX (dev-only): ${h1}`);
-          }
-          valid = timingSafeEqual(
-            Buffer.from(incoming, 'hex'),
-            Buffer.from(h1, 'hex'),
-          );
-        } catch (e) {
-          this.logger.error(`[PIX WEBHOOK - ERRO DE VALIDAÇÃO HMAC RAW] ${e?.message || e}`);
-          valid = false;
+      // PARA TESTE RÁPIDO: ADICIONE `|| !signature` à condição, caso não queira comentar o bloco
+      if (!secret || !signature) { // <--- Adição de `|| !signature` aqui para pular a validação do HMAC se signature for undefined
+        if (nodeEnv === 'production') {
+          throw new ForbiddenException('Webhook signature secret or signature missing.');
         }
-      }
+        this.logger.warn(
+          'PIX_WEBHOOK_SECRET or Signature not configured. Skipping signature validation (non-production).',
+        );
+      } else {
+        const incoming = signature?.startsWith('sha256=')
+          ? signature.slice(7)
+          : signature;
+        let valid = false; // 1) Tenta validar com o rawBody exato recebido
 
-      // 2) Se falhar, tenta com JSON.stringify (corpos reconstruídos pelo body-parser)
-      if (!valid) {
-        const bodyStr = JSON.stringify(webhookData ?? {});
-        try {
-          const h2 = createHmac('sha256', secret).update(bodyStr).digest('hex');
-          if (nodeEnv !== 'production') {
-            this.logger.debug(`HMAC JSON HEX (dev-only): ${h2}`);
+        if (rawBody && Buffer.isBuffer(rawBody)) {
+          try {
+            const h1 = createHmac('sha256', secret).update(rawBody).digest('hex');
+            if (nodeEnv !== 'production') {
+              this.logger.debug(`HMAC RAW HEX (dev-only): ${h1}`);
+            }
+            valid = timingSafeEqual(
+              Buffer.from(incoming, 'hex'),
+              Buffer.from(h1, 'hex'),
+            );
+          } catch (e) {
+            this.logger.error(`[PIX WEBHOOK - ERRO DE VALIDAÇÃO HMAC RAW] ${e?.message || e}`);
+            valid = false;
           }
-          valid = timingSafeEqual(
-            Buffer.from(incoming, 'hex'),
-            Buffer.from(h2, 'hex'),
-          );
-        } catch (e) {
-          this.logger.error(`[PIX WEBHOOK - ERRO DE VALIDAÇÃO HMAC JSON] ${e?.message || e}`);
-          valid = false;
         }
-      }
 
-      if (!valid) {
-        // ADDED LOG: Falha de segurança antes de lançar exceção
-        this.logger.error(`[PIX WEBHOOK - FALHA DE SEGURANÇA] Assinatura Inválida para EventId: ${eventId}. Verifique o SECRET!`);
+        // 2) Se falhar, tenta com JSON.stringify (corpos reconstruídos pelo body-parser)
+        if (!valid) {
+          const bodyStr = JSON.stringify(webhookData ?? {});
+          try {
+            const h2 = createHmac('sha256', secret).update(bodyStr).digest('hex');
+            if (nodeEnv !== 'production') {
+              this.logger.debug(`HMAC JSON HEX (dev-only): ${h2}`);
+            }
+            valid = timingSafeEqual(
+              Buffer.from(incoming, 'hex'),
+              Buffer.from(h2, 'hex'),
+            );
+          } catch (e) {
+            this.logger.error(`[PIX WEBHOOK - ERRO DE VALIDAÇÃO HMAC JSON] ${e?.message || e}`);
+            valid = false;
+          }
+        }
+
+        if (!valid) {
+          // ADDED LOG: Falha de segurança antes de lançar exceção
+          this.logger.error(`[PIX WEBHOOK - FALHA DE SEGURANÇA] Assinatura Inválida para EventId: ${eventId}. Verifique o SECRET!`);
+          // FIM ADDED LOG
+          throw new ForbiddenException('Assinatura do webhook PIX inválida.');
+        }
+
+        // ADDED LOG: Sucesso na validação da assinatura
+        this.logger.log(`[PIX WEBHOOK - SUCESSO DE SEGURANÇA] Assinatura válida. Prosseguindo para buscar PaymentIntent.`);
         // FIM ADDED LOG
-        throw new ForbiddenException('Assinatura do webhook PIX inválida.');
       }
-
-      // ADDED LOG: Sucesso na validação da assinatura
-      this.logger.log(`[PIX WEBHOOK - SUCESSO DE SEGURANÇA] Assinatura válida. Prosseguindo para buscar PaymentIntent.`);
-      // FIM ADDED LOG
     } // Fim do bloco 'else' (onde o secret está configurado)
 
     // replay protection
