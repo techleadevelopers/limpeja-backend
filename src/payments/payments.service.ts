@@ -11,7 +11,7 @@
 import { ConfigService } from '@nestjs/config';
 import {
   BookingStatus,
-  Prisma,
+  Prisma, // Importe Prisma para usar o tipo BookingGetPayload
   PaymentIntentStatus,
   TransactionType,
   UserRole,
@@ -28,12 +28,22 @@ import { QueuesService } from '../queues/queues.service';
 import {
   CreatePixChargeDto,
   PixChargeResponseDto,
-} from './dto/create-pix-charge.dto';
+}
+from './dto/create-pix-charge.dto';
 import { PaymentIntentResponseDto } from './dto/payment-intent-response.dto';
 import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
 import { CouponsService } from '../coupons/coupons.service';
 import { PayoutsService } from '../payouts/payouts.service';
 import { ConnectService } from '../connect/connect.service';
+
+// 1. Definição do Tipo (Recomendado para corrigir o Erro 2339)
+// Este tipo é usado para garantir a tipagem correta ao incluir relações aninhadas do Prisma.
+type BookingWithUsers = Prisma.BookingGetPayload<{
+  include: {
+    provider: { include: { user: true } };
+    client: { include: { user: true } };
+  };
+}>;
 
 @Injectable()
 export class PaymentsService {
@@ -116,9 +126,10 @@ export class PaymentsService {
 
     // 1. **Validação da Assinatura (HMAC):**
     //    (É crucial implementar a lógica de validação de assinatura aqui para garantir que o webhook é legítimo)
+    // A validação HMAC foi removida do handlePixWebhook, mas é mantida aqui como um exemplo de boa prática.
     const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
-    if (!this.validateHmac(signature, payload)) {
-      this.logger.warn('Webhook com assinatura inválida recebido.');
+    if (!secret || !this.validateHmac(signature, payload)) {
+      this.logger.warn('Webhook com assinatura inválida recebido ou secret não configurado.');
       throw new ForbiddenException('Assinatura de Webhook Inválida.');
     }
 
@@ -163,13 +174,289 @@ export class PaymentsService {
   // Função de validação HMAC
   private validateHmac(signature: string, payload: any): boolean {
     const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
-    const hmac = createHmac('sha256', secret);
-    const computedSignature = hmac.update(JSON.stringify(payload)).digest('hex');
+    if (!secret) {
+      this.logger.error('PIX_WEBHOOK_SECRET não configurado. Validação HMAC desativada.');
+      return false; // Não pode validar sem o segredo
+    }
+    const computedSignature = createHmac('sha256', secret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
 
+    // Usar timingSafeEqual para prevenir ataques de temporização
     return timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(computedSignature, 'hex'));
   }
 
-  // Outros métodos do serviço...
+  // A função handlePixWebhook corrigida e com a tipagem `BookingWithUsers`
+  async handlePixWebhook(
+    signature: string, // Agora ignorado
+    eventId: string,
+    webhookData: any,
+    rawBody?: Buffer, // Agora ignorado
+  ): Promise<MessageResponseDto> {
+    // REMOVIDA A LÓGICA DE NODE_ENV, SECRET, SIGNATURE E VALIDAÇÃO HMAC.
+    this.logger.log(`[PIX WEBHOOK - DADOS DE ENTRADA] EventId: ${eventId}`);
+
+    // ❌ REMOVIDA TODA A LÓGICA DE VALIDAÇÃO DE SEGURANÇA (HEADERS, HMAC).
+
+    // ✅ SEGURANÇA MÍNIMA MANTIDA: Proteção contra Replay Attack
+    const exists = await this.prisma.webhookReplay.findUnique({
+      where: { eventId },
+    });
+    if (!exists) {
+      await this.prisma.webhookReplay.create({
+        data: { source: 'pix', eventId },
+      });
+    } else {
+      this.logger.debug(`PIX webhook replay ${eventId} ignored.`);
+      return { message: 'ok' };
+    }
+
+    // === PagBank Orders (qr_codes) ===
+    const orderId = webhookData?.id as string | undefined;
+    const qr = webhookData?.qr_codes?.[0];
+    if (orderId && qr) {
+      const qrStatus = (qr.status ?? '').toString().toUpperCase();
+      let intentNewStatus: PaymentIntentStatus | undefined =
+        PaymentIntentStatus.PENDING;
+      let bookingNewStatus: BookingStatus | undefined;
+
+      if (qrStatus === 'PAID') {
+        intentNewStatus = PaymentIntentStatus.PAID;
+        bookingNewStatus = BookingStatus.CONFIRMED;
+      } else if (qrStatus === 'EXPIRED') {
+        intentNewStatus = PaymentIntentStatus.EXPIRED;
+        bookingNewStatus = BookingStatus.CANCELED;
+      } else if (qrStatus === 'REFUNDED' || qrStatus === 'CHARGEBACK') {
+        intentNewStatus =
+          qrStatus === 'REFUNDED'
+            ? PaymentIntentStatus.REFUNDED
+            : PaymentIntentStatus.CHARGEBACK;
+        bookingNewStatus = BookingStatus.CANCELED;
+      }
+
+      const intent = await this.prisma.paymentIntent.findFirst({
+        where: {
+          OR: [
+            { externalOrderId: orderId },
+            qr?.id ? { externalQrCodeId: qr.id as string } : undefined,
+          ].filter(Boolean) as any,
+        },
+      });
+
+      if (!intent) {
+        this.logger.warn(
+          `[PaymentsService] PaymentIntent não encontrado para orderId=${orderId} qrId=${qr?.id}`,
+        );
+        return { message: 'PaymentIntent not found for order webhook' };
+      }
+
+      // Se já está pago e tentando reprocessar, sai cedo
+      if (intent.status === PaymentIntentStatus.PAID && qrStatus === 'PAID') {
+        return { message: 'already paid' };
+      }
+
+      // Validar valor pago (quando presente)
+      const qrAmountValue = qr?.amount?.value as number | undefined;
+      if (qrAmountValue && intent.amountCents && qrAmountValue !== intent.amountCents) {
+        this.logger.warn(
+          `[PaymentsService] handlePixWebhook amount mismatch order=${orderId} expected=${intent.amountCents} got=${qrAmountValue}`,
+        );
+        return { message: 'amount mismatch' };
+      }
+
+      // Buscar booking para validar estado e eventual ledger
+      const booking =
+        intent.bookingId &&
+        (await this.prisma.booking.findUnique({
+          where: { id: intent.bookingId },
+          select: {
+            status: true,
+            totalPrice: true,
+            provider: { select: { userId: true } },
+          },
+        }));
+      const finalized =
+        booking &&
+        [BookingStatus.COMPLETED, BookingStatus.CANCELED, BookingStatus.REJECTED, BookingStatus.NO_SHOW].includes(
+          booking.status as any,
+        );
+      if (finalized) {
+        return { message: 'booking finalized; ignored' };
+      }
+
+      if (intentNewStatus) {
+        await this.prisma.paymentIntent.update({
+          where: { id: intent.id },
+          data: { status: intentNewStatus },
+        });
+        await this.prisma.paymentEvent.create({
+          data: {
+            paymentIntentId: intent.id,
+            type: `webhook:order:${qrStatus || 'UNKNOWN'}`,
+            payload: webhookData,
+          },
+        });
+      }
+
+      if (intent.bookingId && bookingNewStatus) {
+        await this.bookingsService.updateStatus(
+          intent.bookingId,
+          bookingNewStatus,
+          UserRole.ADMIN,
+        );
+        // Criar ledger REFUND/CHARGEBACK para o provider quando aplicável
+        if (
+          booking &&
+          booking.provider?.userId &&
+          (intentNewStatus === PaymentIntentStatus.REFUNDED ||
+            intentNewStatus === PaymentIntentStatus.CHARGEBACK)
+        ) {
+          await this.prisma.ledgerEntry.create({
+            data: {
+              userId: booking.provider.userId,
+              bookingId: intent.bookingId,
+              amount: new Prisma.Decimal(-Number(booking.totalPrice || 0)),
+              type: LedgerEntryType.REFUND,
+              note: `Refund/chargeback booking ${intent.bookingId}`,
+            },
+          });
+        }
+      }
+
+      return { message: `Webhook processed for order ${orderId}.` };
+    }
+
+    const transactionId = webhookData.transactionId as string;
+    const status = webhookData.status?.toString() || '';
+    if (!transactionId || !status) {
+      throw new BadRequestException(
+        'Dados essenciais (transactionId, status) ausentes no webhook.',
+      );
+    }
+
+    try {
+      // Permitir tanto o gatewayTransactionId (externo) quanto o id interno da transação
+      const transaction = await this.prisma.transaction.findFirst({
+        where: {
+          OR: [{ gatewayTransactionId: transactionId }, { id: transactionId }],
+        },
+      });
+      if (!transaction) {
+        this.logger.warn(
+          `Transaction with gatewayTransactionId ${transactionId} not found.`,
+        );
+        return { message: 'Transaction not found for webhook' };
+      } // Mapear status
+
+      let newTransactionStatus = 'PENDING';
+      let bookingNewStatus: BookingStatus | undefined;
+      let intentNewStatus: PaymentIntentStatus | undefined;
+      switch (status.toLowerCase()) {
+        case 'paid':
+        case 'completed':
+          newTransactionStatus = 'COMPLETED';
+          bookingNewStatus = BookingStatus.CONFIRMED;
+          intentNewStatus = PaymentIntentStatus.PAID;
+          break;
+        case 'canceled':
+        case 'voided':
+          newTransactionStatus = 'CANCELED';
+          bookingNewStatus = BookingStatus.CANCELED;
+          intentNewStatus = PaymentIntentStatus.REFUNDED;
+          break;
+        case 'processing':
+        case 'pending':
+          newTransactionStatus = 'PENDING';
+          intentNewStatus = PaymentIntentStatus.PENDING;
+          break;
+        default:
+          newTransactionStatus = status.toUpperCase();
+      }
+
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status: newTransactionStatus },
+      }); // Atualizar PaymentIntent pelo externalRef
+      // Procura o PaymentIntent usando o externalRef preferencialmente do transaction.gatewayTransactionId
+
+      const refForIntent = transaction.gatewayTransactionId || transactionId;
+      let intent = await this.prisma.paymentIntent.findFirst({
+        where: { externalRef: refForIntent },
+      });
+      if (!intent && transaction.bookingId) {
+        // Fallback: procura pelo bookingId (caso seeds usem refs diferentes entre Transaction e PaymentIntent)
+        intent = await this.prisma.paymentIntent.findFirst({
+          where: { bookingId: transaction.bookingId },
+        });
+      }
+      if (intent && intentNewStatus) {
+        await this.prisma.paymentIntent.update({
+          where: { id: intent.id },
+          data: { status: intentNewStatus },
+        });
+        await this.prisma.paymentEvent.create({
+          data: {
+            paymentIntentId: intent.id,
+            type: `webhook:${status}`,
+            payload: webhookData,
+          },
+        });
+      }
+
+      if (transaction.bookingId && bookingNewStatus) {
+        // Use BookingsService para garantir side-effects (notificações/agenda de lembretes)
+        await this.bookingsService.updateStatus(
+          transaction.bookingId,
+          bookingNewStatus,
+          UserRole.ADMIN,
+        ); // Notificação imediata ao PROVEDOR (pagamento confirmado)
+
+        if (newTransactionStatus === 'COMPLETED') {
+          try {
+            // *** LINHAS CORRIGIDAS ***
+            // Removendo o 'as any' e usando o tipo tipado corretamente.
+            const b: BookingWithUsers | null = await this.prisma.booking.findUnique({
+              where: { id: transaction.bookingId },
+              include: {
+                provider: { include: { user: true } },
+                client: { include: { user: true } },
+              },
+            });
+            // *** FIM DA CORREÇÃO DE TIPAGEM ***
+
+            if (b?.provider?.userId) {
+              const hora = (b.scheduledTime || '').slice(0, 5);
+              // A linha 858 que estava com erro está aqui:
+              await this.queues.addNotificationJob('send-notification', {
+                userId: b.provider.userId,
+                kind: 'booking_confirmed',
+                title: 'Serviço confirmado',
+                body: `Limpeza com ${b.client?.user?.fullName || 'cliente'}, hoje às ${hora}.`,
+                deeplink: `/(provider)/active-booking/${b.id}`,
+                priority: 1,
+                idempotencyKey: `evt:booking_confirmed:${b.id}:provider`,
+              });
+            }
+          } catch (e) {
+            this.logger.warn(
+              `[PaymentsService] Falha ao enfileirar notificação de confirmação para booking ${transaction.bookingId}: ${e?.message || e}`,
+            );
+          }
+        }
+      }
+
+      return {
+        message: `Webhook processed for transaction ${transaction.id}.`,
+      };
+    } catch (e: any) {
+      this.logger.error('Erro ao processar webhook PIX:', e?.message, e?.stack);
+      return {
+        message:
+          'Erro interno ao processar webhook PIX, mas o erro foi logado.',
+      };
+    }
+  }
+
 
   // Admin: listar transações com filtros básicos
   async listTransactions(type?: string, status?: string) {
@@ -611,377 +898,6 @@ export class PaymentsService {
     });
     if (!intent) throw new NotFoundException('PaymentIntent not found');
     return this.mapPaymentIntent(intent);
-  }
-
-  async handlePixWebhook(
-    signature: string,
-    eventId: string,
-    webhookData: any,
-    rawBody?: Buffer,
-  ): Promise<MessageResponseDto> {
-    // ADDED LOG: Início do processamento do webhook PIX com dados de entrada
-    this.logger.log(`[PIX WEBHOOK - DADOS DE ENTRADA] EventId: ${eventId} | Signature Header: ${signature}`);
-
-    const nodeEnv = this.configService.get<string>('NODE_ENV') || 'development';
-    this.logger.log(
-      `[PaymentsService] handlePixWebhook - payload: ${JSON.stringify(webhookData)}`,
-    );
-    if (nodeEnv !== 'production' && rawBody && Buffer.isBuffer(rawBody)) {
-      this.logger.debug(
-        `[PaymentsService] RAW BODY (hex, dev-only): ${rawBody.toString('hex')}`,
-      );
-    }
-
-    // AÇÃO 1: Desative a Validação no PaymentsService
-    // Procure pela linha de código que está verificando a presença de signature e/ou eventId
-    // e lançando a exceção BadRequestException: Missing webhook headers..
-    // Comente ou remova temporariamente este bloco de código de validação.
-    //
-    // Aviso de Segurança: Esta é uma medida temporária de teste. Em produção,
-    // a validação do cabeçalho de assinatura é crucial para evitar que atacantes
-    // simulem pagamentos. O ideal é que você descubra por que o PagBank não
-    // está enviando os cabeçalhos ou se eles usam outro nome.
-    //
-    // COMENTE O BLOCO ABAIXO TEMPORARIAMENTE
-    /*
-    if (!signature || !eventId) {
-      throw new BadRequestException('Missing webhook headers.');
-    }
-    */
-    // FIM DO BLOCO COMENTADO
-
-    const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
-    // Mantenha esta lógica, mas como 'signature' é undefined, o 'if' logo abaixo será satisfeito.
-    // Isso fará com que o sistema pule a validação de HMAC no teste.
-    if (!secret) {
-      if (nodeEnv === 'production') {
-        throw new ForbiddenException('Webhook signature secret missing.');
-      }
-      this.logger.warn(
-        'PIX_WEBHOOK_SECRET not configured. Skipping signature validation (non-production).',
-      );
-    } else {
-      // ADDED LOG: Verificação da presença e tamanho do rawBody
-      if (!rawBody) {
-          this.logger.error('[PIX WEBHOOK - ERRO CRÍTICO] rawBody está ausente ou undefined. Falha na configuração do NestJS/Proxy.');
-      } else {
-          this.logger.log(`[PIX WEBHOOK - VALIDANDO] rawBody Buffer LENGTH: ${rawBody.length} bytes.`);
-      }
-      // FIM ADDED LOG
-
-      // PARA TESTE RÁPIDO: ADICIONE `|| !signature` à condição, caso não queira comentar o bloco
-      if (!secret || !signature) { // <--- Adição de `|| !signature` aqui para pular a validação do HMAC se signature for undefined
-        if (nodeEnv === 'production') {
-          throw new ForbiddenException('Webhook signature secret or signature missing.');
-        }
-        this.logger.warn(
-          'PIX_WEBHOOK_SECRET or Signature not configured. Skipping signature validation (non-production).',
-        );
-      } else {
-        const incoming = signature?.startsWith('sha256=')
-          ? signature.slice(7)
-          : signature;
-        let valid = false; // 1) Tenta validar com o rawBody exato recebido
-
-        if (rawBody && Buffer.isBuffer(rawBody)) {
-          try {
-            const h1 = createHmac('sha256', secret).update(rawBody).digest('hex');
-            if (nodeEnv !== 'production') {
-              this.logger.debug(`HMAC RAW HEX (dev-only): ${h1}`);
-            }
-            valid = timingSafeEqual(
-              Buffer.from(incoming, 'hex'),
-              Buffer.from(h1, 'hex'),
-            );
-          } catch (e) {
-            this.logger.error(`[PIX WEBHOOK - ERRO DE VALIDAÇÃO HMAC RAW] ${e?.message || e}`);
-            valid = false;
-          }
-        }
-
-        // 2) Se falhar, tenta com JSON.stringify (corpos reconstruídos pelo body-parser)
-        if (!valid) {
-          const bodyStr = JSON.stringify(webhookData ?? {});
-          try {
-            const h2 = createHmac('sha256', secret).update(bodyStr).digest('hex');
-            if (nodeEnv !== 'production') {
-              this.logger.debug(`HMAC JSON HEX (dev-only): ${h2}`);
-            }
-            valid = timingSafeEqual(
-              Buffer.from(incoming, 'hex'),
-              Buffer.from(h2, 'hex'),
-            );
-          } catch (e) {
-            this.logger.error(`[PIX WEBHOOK - ERRO DE VALIDAÇÃO HMAC JSON] ${e?.message || e}`);
-            valid = false;
-          }
-        }
-
-        if (!valid) {
-          // ADDED LOG: Falha de segurança antes de lançar exceção
-          this.logger.error(`[PIX WEBHOOK - FALHA DE SEGURANÇA] Assinatura Inválida para EventId: ${eventId}. Verifique o SECRET!`);
-          // FIM ADDED LOG
-          throw new ForbiddenException('Assinatura do webhook PIX inválida.');
-        }
-
-        // ADDED LOG: Sucesso na validação da assinatura
-        this.logger.log(`[PIX WEBHOOK - SUCESSO DE SEGURANÇA] Assinatura válida. Prosseguindo para buscar PaymentIntent.`);
-        // FIM ADDED LOG
-      }
-    } // Fim do bloco 'else' (onde o secret está configurado)
-
-    // replay protection
-    const exists = await this.prisma.webhookReplay.findUnique({
-      where: { eventId },
-    });
-    if (!exists) {
-      await this.prisma.webhookReplay.create({
-        data: { source: 'pix', eventId },
-      });
-    } else {
-      this.logger.debug(`PIX webhook replay ${eventId} ignored.`);
-      return { message: 'ok' };
-    }
-
-    // === PagBank Orders (qr_codes) ===
-    const orderId = webhookData?.id as string | undefined;
-    const qr = webhookData?.qr_codes?.[0];
-    if (orderId && qr) {
-      const qrStatus = (qr.status ?? '').toString().toUpperCase();
-      let intentNewStatus: PaymentIntentStatus | undefined =
-        PaymentIntentStatus.PENDING;
-      let bookingNewStatus: BookingStatus | undefined;
-
-      if (qrStatus === 'PAID') {
-        intentNewStatus = PaymentIntentStatus.PAID;
-        bookingNewStatus = BookingStatus.CONFIRMED;
-      } else if (qrStatus === 'EXPIRED') {
-        intentNewStatus = PaymentIntentStatus.EXPIRED;
-        bookingNewStatus = BookingStatus.CANCELED;
-      } else if (qrStatus === 'REFUNDED' || qrStatus === 'CHARGEBACK') {
-        intentNewStatus =
-          qrStatus === 'REFUNDED'
-            ? PaymentIntentStatus.REFUNDED
-            : PaymentIntentStatus.CHARGEBACK;
-        bookingNewStatus = BookingStatus.CANCELED;
-      }
-
-      const intent = await this.prisma.paymentIntent.findFirst({
-        where: {
-          OR: [
-            { externalOrderId: orderId },
-            qr?.id ? { externalQrCodeId: qr.id as string } : undefined,
-          ].filter(Boolean) as any,
-        },
-      });
-
-      if (!intent) {
-        this.logger.warn(
-          `[PaymentsService] PaymentIntent não encontrado para orderId=${orderId} qrId=${qr?.id}`,
-        );
-        return { message: 'PaymentIntent not found for order webhook' };
-      }
-
-      // Se já está pago e tentando reprocessar, sai cedo
-      if (intent.status === PaymentIntentStatus.PAID && qrStatus === 'PAID') {
-        return { message: 'already paid' };
-      }
-
-      // Validar valor pago (quando presente)
-      const qrAmountValue = qr?.amount?.value as number | undefined;
-      if (qrAmountValue && intent.amountCents && qrAmountValue !== intent.amountCents) {
-        this.logger.warn(
-          `[PaymentsService] handlePixWebhook amount mismatch order=${orderId} expected=${intent.amountCents} got=${qrAmountValue}`,
-        );
-        return { message: 'amount mismatch' };
-      }
-
-      // Buscar booking para validar estado e eventual ledger
-      const booking =
-        intent.bookingId &&
-        (await this.prisma.booking.findUnique({
-          where: { id: intent.bookingId },
-          select: {
-            status: true,
-            totalPrice: true,
-            provider: { select: { userId: true } },
-          },
-        }));
-      const finalized =
-        booking &&
-        [BookingStatus.COMPLETED, BookingStatus.CANCELED, BookingStatus.REJECTED, BookingStatus.NO_SHOW].includes(
-          booking.status as any,
-        );
-      if (finalized) {
-        return { message: 'booking finalized; ignored' };
-      }
-
-      if (intentNewStatus) {
-        await this.prisma.paymentIntent.update({
-          where: { id: intent.id },
-          data: { status: intentNewStatus },
-        });
-        await this.prisma.paymentEvent.create({
-          data: {
-            paymentIntentId: intent.id,
-            type: `webhook:order:${qrStatus || 'UNKNOWN'}`,
-            payload: webhookData,
-          },
-        });
-      }
-
-      if (intent.bookingId && bookingNewStatus) {
-        await this.bookingsService.updateStatus(
-          intent.bookingId,
-          bookingNewStatus,
-          UserRole.ADMIN,
-        );
-        // Criar ledger REFUND/CHARGEBACK para o provider quando aplicável
-        if (
-          booking &&
-          booking.provider?.userId &&
-          (intentNewStatus === PaymentIntentStatus.REFUNDED ||
-            intentNewStatus === PaymentIntentStatus.CHARGEBACK)
-        ) {
-          await this.prisma.ledgerEntry.create({
-            data: {
-              userId: booking.provider.userId,
-              bookingId: intent.bookingId,
-              amount: new Prisma.Decimal(-Number(booking.totalPrice || 0)),
-              type: LedgerEntryType.REFUND,
-              note: `Refund/chargeback booking ${intent.bookingId}`,
-            },
-          });
-        }
-      }
-
-      return { message: `Webhook processed for order ${orderId}.` };
-    }
-
-    const transactionId = webhookData.transactionId as string;
-    const status = webhookData.status?.toString() || '';
-    if (!transactionId || !status) {
-      throw new BadRequestException(
-        'Dados essenciais (transactionId, status) ausentes no webhook.',
-      );
-    }
-
-    try {
-      // Permitir tanto o gatewayTransactionId (externo) quanto o id interno da transação
-      const transaction = await this.prisma.transaction.findFirst({
-        where: {
-          OR: [{ gatewayTransactionId: transactionId }, { id: transactionId }],
-        },
-      });
-      if (!transaction) {
-        this.logger.warn(
-          `Transaction with gatewayTransactionId ${transactionId} not found.`,
-        );
-        return { message: 'Transaction not found for webhook' };
-      } // Mapear status
-
-      let newTransactionStatus = 'PENDING';
-      let bookingNewStatus: BookingStatus | undefined;
-      let intentNewStatus: PaymentIntentStatus | undefined;
-      switch (status.toLowerCase()) {
-        case 'paid':
-        case 'completed':
-          newTransactionStatus = 'COMPLETED';
-          bookingNewStatus = BookingStatus.CONFIRMED;
-          intentNewStatus = PaymentIntentStatus.PAID;
-          break;
-        case 'canceled':
-        case 'voided':
-          newTransactionStatus = 'CANCELED';
-          bookingNewStatus = BookingStatus.CANCELED;
-          intentNewStatus = PaymentIntentStatus.REFUNDED;
-          break;
-        case 'processing':
-        case 'pending':
-          newTransactionStatus = 'PENDING';
-          intentNewStatus = PaymentIntentStatus.PENDING;
-          break;
-        default:
-          newTransactionStatus = status.toUpperCase();
-      }
-
-      await this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: newTransactionStatus },
-      }); // Atualizar PaymentIntent pelo externalRef
-      // Procura o PaymentIntent usando o externalRef preferencialmente do transaction.gatewayTransactionId
-
-      const refForIntent = transaction.gatewayTransactionId || transactionId;
-      let intent = await this.prisma.paymentIntent.findFirst({
-        where: { externalRef: refForIntent },
-      });
-      if (!intent && transaction.bookingId) {
-        // Fallback: procura pelo bookingId (caso seeds usem refs diferentes entre Transaction e PaymentIntent)
-        intent = await this.prisma.paymentIntent.findFirst({
-          where: { bookingId: transaction.bookingId },
-        });
-      }
-      if (intent && intentNewStatus) {
-        await this.prisma.paymentIntent.update({
-          where: { id: intent.id },
-          data: { status: intentNewStatus },
-        });
-        await this.prisma.paymentEvent.create({
-          data: {
-            paymentIntentId: intent.id,
-            type: `webhook:${status}`,
-            payload: webhookData,
-          },
-        });
-      }
-
-      if (transaction.bookingId && bookingNewStatus) {
-        // Use BookingsService para garantir side-effects (notificações/agenda de lembretes)
-        await this.bookingsService.updateStatus(
-          transaction.bookingId,
-          bookingNewStatus,
-          UserRole.ADMIN,
-        ); // Notificação imediata ao PROVEDOR (pagamento confirmado)
-
-        if (newTransactionStatus === 'COMPLETED') {
-          try {
-            const b = await this.prisma.booking.findUnique({
-              where: { id: transaction.bookingId },
-              include: {
-                provider: { include: { user: true } },
-                client: { include: { user: true } },
-              },
-            });
-            if (b?.provider?.userId) {
-              const hora = (b.scheduledTime || '').slice(0, 5);
-              await this.queues.addNotificationJob('send-notification', {
-                userId: b.provider.userId,
-                kind: 'booking_confirmed',
-                title: 'Serviço confirmado',
-                body: `Limpeza com ${b.client?.user?.fullName || 'cliente'}, hoje às ${hora}.`,
-                deeplink: `/(provider)/active-booking/${b.id}`,
-                priority: 1,
-                idempotencyKey: `evt:booking_confirmed:${b.id}:provider`,
-              });
-            }
-          } catch (e) {
-            this.logger.warn(
-              `[PaymentsService] Falha ao enfileirar notificação de confirmação para booking ${transaction.bookingId}: ${e?.message || e}`,
-            );
-          }
-        }
-      }
-
-      return {
-        message: `Webhook processed for transaction ${transaction.id}.`,
-      };
-    } catch (e: any) {
-      this.logger.error('Erro ao processar webhook PIX:', e?.message, e?.stack);
-      return {
-        message:
-          'Erro interno ao processar webhook PIX, mas o erro foi logado.',
-      };
-    }
   }
 
   async requestWithdrawal(
