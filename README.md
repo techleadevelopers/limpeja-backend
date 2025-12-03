@@ -16,6 +16,50 @@ Sentry: Ferramenta de monitoramento de erros e performance, integrada para captu
 C. Estrutura Geral dos Módulos e Interconexões
 O backend é organizado em módulos coesos, cada um com responsabilidades bem definidas, promovendo a separação de preocupações e a manutenibilidade do código. A injeção de dependências do NestJS facilita a comunicação entre os módulos.
 
+## Auditoria técnica (dez/2025) — riscos e correções prioritárias
+
+- **Bookings/Payments**
+  - Falta de ownership nas transições (`bookings.service.ts:updateStatus`): qualquer provider consegue confirmar/concluir booking alheio (e webhooks usam ADMIN bypass). Bloquear se `req.user` não for owner.
+  - Fluxo quebrado: `CONFIRMED -> COMPLETED` direto ignora `startedAt`, janela de início e `paymentIntent=PAID`; corte mínimo usa só `MIN_SERVICE_MINUTES` e aceita concluir serviços longos em 15min.
+  - PIX: `createPixCharge` usa `amount` do DTO (não cruza com `booking.totalPrice`); webhook marca `CONFIRMED` sem checar valor/estado atual; refunds/chargebacks não evitam reabertura.
+  - Estados divergentes: enums/labels incluem ACCEPTED/STARTED/REVIEWABLE/REFUNDED que não existem no Prisma; PENDING_DISPUTE/NO_SHOW não tratados no DTO.
+
+- **Availability**
+  - `getAvailability` marca ocupados apenas `CONFIRMED/IN_PROGRESS/COMPLETED`; `PENDING` fica livre (double booking).
+  - `create/update/bulk` não valida overlap com bookings nem `start<end`, nem impede alterar passado; sem lock/transação.
+  - Endpoint público `GET /providers/:id/availability` permite scraping; índice faltante `(providerId, dayOfWeek)`.
+
+- **Reviews**
+  - Controller envia `clientId` do token mas serviço valida `userId` -> todas reviews falham (Forbidden).
+  - Respostas públicas expõem `client.user`/`provider.user` (PII) e não tratam `P2002` em concorrência.
+  - Janela de review usa hora local do servidor (não America/Sao_Paulo).
+
+- **Earnings/Withdraw**
+  - Saldo e saque dependem apenas de ledger; não amarram a `PaymentIntent` (REFUND/CHARGEBACK continuam no saldo).
+  - Webhook de payout aceita `payoutId/status` sem validar transições ou vínculo; assinatura opcional.
+  - UI `preApprovedEarnings` conta bookings pagos mesmo em `PENDING/CONFIRMED` e não exclui chargeback/refund.
+
+- **Provider services/settings**
+  - Buscas/ranking retornam campos sensíveis (cpf/pix/docs KYC) ao frontend.
+  - `providerService` update não garante owner (where usa id único) e não valida coerência por `pricingType` (HOURLY sem pricePerHour/duration).
+  - Raio configurado em `/providers/me/settings` não é aplicado em buscas/cotações.
+
+- **Logs/Observabilidade**
+  - Logs verbosos com DTOs completos (endereços, tax_id, pix) e sem máscara; vários `catch {}` silenciosos; sem correlação/idempotency.
+
+- **Performance/Indexação**
+  - Includes pesados em `findUpcomingBookings`/`findUserBookings`/dashboard sem projeção ou cache.
+  - Recomendado índice Prisma: `Availability @@index([providerId, dayOfWeek])`.
+
+### Correções recomendadas (alto nível)
+1) Endurecer bookings: ownership por token; exigir `IN_PROGRESS` + `startedAt` + `PaymentIntent=PAID`; bloquear reprocesso de finais; alinhar enums/labels ao Prisma.
+2) Pagamentos: usar `booking.totalPrice` no PIX; no webhook validar valor/status e mapear refund/chargeback para estado seguro sem reabrir booking.
+3) Disponibilidade: considerar `PENDING/RESCHEDULED` ocupados; validar overlaps com bookings/slots; impedir passado; usar lock/transação; proteger endpoint público ou sanitizar.
+4) Reviews: usar `userId` correto; sanitizar includes; tratar `P2002`; alinhar timezone.
+5) Earnings/withdraw: saldo só com bookings `COMPLETED` + `PaymentIntent=PAID`; criar ledger REFUND em reversão; webhook payout com assinatura obrigatória e transição válida.
+6) Provider services/settings: remover PII das buscas; validar preços por `pricingType`; garantir owner em update/delete; aplicar `serviceRadiusKm` nas buscas.
+7) Logging: padronizar logs estruturados com máscara de PII, reduzir verbosidade em hot paths e registrar erros de fila/webhook com correlation-id.
+
 II. Documentação Detalhada por Módulo
 1. Módulo Auth (Autenticação e Autorização)
 Objetivo: Gerenciar o registro, login e autenticação de usuários (clientes, provedores e administradores), além de controlar o acesso a rotas protegidas.

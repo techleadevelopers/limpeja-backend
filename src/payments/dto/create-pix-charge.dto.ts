@@ -34,6 +34,7 @@ export class CreatePixChargeDto {
     example: 'uuid-do-agendamento',
   })
   @IsString()
+  @IsUUID()
   @IsNotEmpty() // Tornando bookingId obrigatório, pois o serviço o usa para consulta e atualização.
   bookingId: string; // Removido '?' para indicar que é obrigatório
 
@@ -58,7 +59,7 @@ export class PixChargeResponseDto {
   orderId: string;
 
   @ApiProperty({
-    description: 'ID da cobran�a PagBank (CHAR_*)',
+    description: 'ID da cobrança PagBank (CHAR_*)',
     example: 'CHAR_123',
   })
   @IsString()
@@ -75,7 +76,7 @@ export class PixChargeResponseDto {
     status: 'PENDING' | 'WAITING' | 'PAID' | 'EXPIRED' | 'CANCELED' | 'FAILED';
 
   @ApiProperty({
-    description: 'C�digo PIX Copia e Cola (BR Code)',
+    description: 'Código PIX Copia e Cola (BR Code)',
     example: '00020126580014BR.GOV.BCB.PIX0136...',
   })
   @IsString()
@@ -91,29 +92,29 @@ export class PixChargeResponseDto {
   qrCodeImageUrl: string;
 
   @ApiProperty({
-    description: 'Data e hora de expira��o da cobran�a no formato ISO 8601.',
+    description: 'Data e hora de expiração da cobrança no formato ISO 8601.',
     example: '2025-06-01T10:30:00.000Z',
   })
   @IsString()
   @IsNotEmpty()
   expiresAt: string;
 
-  @ApiProperty({ description: 'Valor da cobran�a PIX', example: 150.75 })
+  @ApiProperty({ description: 'Valor da cobrança PIX', example: 150.75 })
   @IsNumber()
   @Min(0.01)
   @IsNotEmpty()
   amount: number;
 
   @ApiProperty({
-    description: 'Descri��o da cobran�a PIX',
-    example: 'Pagamento do servi�o de limpeza',
+    description: 'Descrição da cobrança PIX',
+    example: 'Pagamento do serviço de limpeza',
   })
   @IsString()
   @IsNotEmpty()
   description: string;
 
   @ApiProperty({
-    description: 'ID do agendamento relacionado a esta cobran�a',
+    description: 'ID do agendamento relacionado a esta cobrança',
     example: 'uuid-do-agendamento',
   })
   @IsUUID()
@@ -121,7 +122,7 @@ export class PixChargeResponseDto {
   bookingId: string;
 
   @ApiProperty({
-    description: 'ID do provedor que receber� o pagamento',
+    description: 'ID do provedor que receberá o pagamento',
     example: 'uuid-do-provedor',
   })
   @IsUUID()
@@ -129,7 +130,7 @@ export class PixChargeResponseDto {
   providerId: string;
 
   @ApiPropertyOptional({
-    description: 'Payment Intent associado � cobran�a',
+    description: 'Payment Intent associado à cobrança',
     type: () => PaymentIntentResponseDto,
   })
   @IsOptional()

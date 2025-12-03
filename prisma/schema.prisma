@@ -654,6 +654,8 @@ model Availability {
   startTime   String
   endTime     String
   isAvailable Boolean  @default(true)
+
+  @@index([providerId, dayOfWeek])
 }
 
 model FAQItem {

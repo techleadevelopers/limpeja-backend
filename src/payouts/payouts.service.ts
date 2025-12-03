@@ -560,19 +560,16 @@ export class PayoutsService {
     }
 
     const secret = this.configService.get<string>('PSP_WEBHOOK_SECRET');
-    if (secret) {
-      if (!signature) {
-        throw new BadRequestException('Missing webhook signature header.');
-      }
-      const payloadString = JSON.stringify(payload ?? {});
-      if (!this.verifySignature(signature, payloadString, secret)) {
-        this.logger.warn('handleGatewayWebhook: invalid signature.');
-        throw new ForbiddenException('Invalid webhook signature.');
-      }
-    } else {
-      this.logger.warn(
-        'handleGatewayWebhook: PSP_WEBHOOK_SECRET not configured. Skipping signature validation.',
-      );
+    if (!secret) {
+      throw new ForbiddenException('Webhook secret not configured.');
+    }
+    if (!signature) {
+      throw new BadRequestException('Missing webhook signature header.');
+    }
+    const payloadString = JSON.stringify(payload ?? {});
+    if (!this.verifySignature(signature, payloadString, secret)) {
+      this.logger.warn('handleGatewayWebhook: invalid signature.');
+      throw new ForbiddenException('Invalid webhook signature.');
     }
 
     const exists = await this.prisma.webhookReplay.findUnique({
@@ -596,7 +593,29 @@ export class PayoutsService {
       );
     }
 
-    await this.applyGatewayUpdate({ payoutId, status, gatewayTxnId });
+    const payout = await this.prisma.payout.findUnique({
+      where: { id: payoutId },
+      select: { status: true, userId: true, gatewayTxnId: true },
+    });
+    if (!payout) {
+      throw new NotFoundException(`Payout ${payoutId} not found.`);
+    }
+
+    const normalized = this.normalizeStatus(status);
+    if (payout.status === PayoutStatus.PAID && normalized !== PayoutStatus.PAID) {
+      this.logger.warn(
+        `handleGatewayWebhook: ignoring transition from PAID to ${normalized} for payout ${payoutId}`,
+      );
+      return { ok: true, ignored: true };
+    }
+    if (payout.gatewayTxnId && gatewayTxnId && payout.gatewayTxnId !== gatewayTxnId) {
+      this.logger.warn(
+        `handleGatewayWebhook: gatewayTxnId mismatch for payout ${payoutId}`,
+      );
+      throw new ForbiddenException('gatewayTxnId mismatch');
+    }
+
+    await this.applyGatewayUpdate({ payoutId, status: normalized, gatewayTxnId });
     return { ok: true };
   }
 

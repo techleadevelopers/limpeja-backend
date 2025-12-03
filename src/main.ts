@@ -48,7 +48,8 @@ async function bootstrap() {
       // Anexa o buffer original na requisição
       verify: (req: any, _res, buf: Buffer) => {
         try {
-          req.rawBody = Buffer.from(buf);
+          // CORREÇÃO (Simplificação): Usa o buffer diretamente
+          req.rawBody = buf; 
         } catch {
           // ignora
         }

@@ -799,6 +799,7 @@ export class BookingsService {
         provider: { include: { user: true } },
         providerService: { include: { service: true } },
         client: { include: { user: true } }, // <<-- FIXED: Include client for access to its properties
+        paymentIntent: true,
       },
     });
 
@@ -816,8 +817,60 @@ export class BookingsService {
     const prevCompletedCount =
       (booking as any).client?.completedBookingsCount ?? 0;
 
+    // Identidade do ator (quando houver request)
+    const actorUserId =
+      (request as any)?.user?.['userId'] || (request as any)?.user?.['id'];
+    const actorRole =
+      (request as any)?.user?.['role'] || (request as any)?.role || userRole;
+    const actorProviderId =
+      actorRole === UserRole.PROVIDER && actorUserId
+        ? (await this.providersService.findByUserId(actorUserId))?.id
+        : null;
+    const actorClientId =
+      actorRole === UserRole.CLIENT && actorUserId
+        ? (await this.clientsService.findClientByUserId(actorUserId))?.id
+        : null;
+
+    if (userRole === UserRole.CLIENT) {
+      if (!actorClientId || actorClientId !== booking.clientId) {
+        throw new ForbiddenException(
+          await this.i18n
+            .translate?.('booking.forbidden.updateStatus', locale)
+            .catch?.(() => 'Acesso negado ao agendamento.'),
+        );
+      }
+    }
+    if (userRole === UserRole.PROVIDER) {
+      if (!actorProviderId || actorProviderId !== booking.providerId) {
+        throw new ForbiddenException(
+          await this.i18n
+            .translate?.('booking.forbidden.updateStatus', locale)
+            .catch?.(() => 'Acesso negado ao agendamento.'),
+        );
+      }
+    }
+
     let canUpdate = false;
     let errorMessageKey: string = 'booking.badRequest.invalidStatusTransition';
+
+    // Bloqueia reprocessamento de estados finais (exceto ADMIN)
+    const finalizedStates = [
+      BookingStatus.COMPLETED,
+      BookingStatus.CANCELED,
+      BookingStatus.REJECTED,
+      BookingStatus.NO_SHOW,
+    ];
+    if (
+      finalizedStates.includes(booking.status as any) &&
+      userRole !== UserRole.ADMIN
+    ) {
+      throw new BadRequestException(
+        await this.i18n.translate(
+          'booking.badRequest.statusFinalized',
+          locale,
+        ),
+      );
+    }
 
     if (userRole === UserRole.ADMIN) {
       canUpdate = true;
@@ -894,6 +947,15 @@ export class BookingsService {
       }
     }
 
+    if (
+      userRole === UserRole.PROVIDER &&
+      booking.status === BookingStatus.CONFIRMED &&
+      newStatus === BookingStatus.COMPLETED
+    ) {
+      canUpdate = false;
+      errorMessageKey = 'booking.badRequest.providerConfirmedStatus';
+    }
+
     if (!canUpdate) {
       this.logger.warn(
         `[BookingsService] updateStatus: Transição de status não permitida para booking ${id}: de ${booking.status} para ${newStatus} pelo role ${userRole}. Erro: ${errorMessageKey}`,
@@ -946,16 +1008,36 @@ export class BookingsService {
       booking.status === BookingStatus.IN_PROGRESS &&
       newStatus === BookingStatus.COMPLETED
     ) {
+      const payStatus = booking.paymentIntent?.status as
+        | PaymentIntentStatus
+        | undefined;
+      if (payStatus !== PaymentIntentStatus.PAID) {
+        throw new BadRequestException(
+          await this.i18n
+            .translate?.('booking.badRequest.unpaid', locale)
+            .catch?.(() => 'Pagamento n�o confirmado.'),
+        );
+      }
       const minRunMinutes = Math.max(
         0,
         parseInt(process.env.MIN_SERVICE_MINUTES ?? '15', 10) || 15,
       );
       const refStart =
         booking.startedAt ??
+        booking.scheduledStart ??
         this.getScheduledAtInSaoPaulo(
           booking.scheduledDate,
           booking.scheduledTime,
         );
+      const expectedEnd = this.getExpectedEnd(booking as any as Booking);
+      if (expectedEnd && now < expectedEnd) {
+        const msg = await this.i18n
+          .translate?.('booking.badRequest.finishTooEarly', locale)
+          .catch?.(() => null);
+        throw new BadRequestException(
+          msg || 'Finaliza��ǜo muito cedo em rela��ǜo ao hor��rio previsto.',
+        );
+      }
       const runMin = Math.round(
         (now.getTime() - new Date(refStart as any).getTime()) / 60000,
       );

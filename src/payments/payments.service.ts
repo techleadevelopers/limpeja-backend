@@ -16,6 +16,7 @@ import {
   PaymentIntentStatus,
   TransactionType,
   UserRole,
+  LedgerEntryType,
 } from '@prisma/client';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -307,14 +308,10 @@ export class PaymentsService {
     dto: CreatePixChargeDto,
     idempotencyKey?: string,
   ): Promise<PixChargeResponseDto> {
-    const { amount, description, bookingId, providerId } = dto; // === 1. VALIDAÇÕES INICIAIS ===
+    const { description, bookingId, providerId } = dto; // amount sempre derivado do booking
 
     if (!providerId) throw new BadRequestException('providerId é obrigatório.');
     if (!bookingId) throw new BadRequestException('bookingId é obrigatório.');
-
-    const amountCents = Math.round(Number(amount) * 100);
-    if (amountCents < 100)
-      throw new BadRequestException('Valor mínimo é R$ 1,00.'); // Booking + cliente
 
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
@@ -326,6 +323,13 @@ export class PaymentsService {
       throw new ForbiddenException('Você não pode pagar por este booking.');
     if (booking.providerId !== providerId)
       throw new BadRequestException('Booking não pertence a este provider.');
+    if (booking.status !== BookingStatus.PENDING) {
+      throw new BadRequestException('Booking não está pendente para pagamento.');
+    }
+
+    const amountCents = Math.round(Number(booking.totalPrice) * 100);
+    if (amountCents < 100)
+      throw new BadRequestException('Valor mínimo é R$ 1,00.');
 
     const customerName =
       booking.client?.user?.fullName ??
@@ -495,7 +499,7 @@ export class PaymentsService {
       qrCodeText,
       qrCodeImageUrl,
       expiresAt: expiresAt.toISOString(),
-      amount: Number(amount),
+      amount: Number(amountCents) / 100,
       description,
       bookingId,
       providerId,
@@ -629,6 +633,12 @@ export class PaymentsService {
       } else if (qrStatus === 'EXPIRED') {
         intentNewStatus = PaymentIntentStatus.EXPIRED;
         bookingNewStatus = BookingStatus.CANCELED;
+      } else if (qrStatus === 'REFUNDED' || qrStatus === 'CHARGEBACK') {
+        intentNewStatus =
+          qrStatus === 'REFUNDED'
+            ? PaymentIntentStatus.REFUNDED
+            : PaymentIntentStatus.CHARGEBACK;
+        bookingNewStatus = BookingStatus.CANCELED;
       }
 
       const intent = await this.prisma.paymentIntent.findFirst({
@@ -645,6 +655,40 @@ export class PaymentsService {
           `[PaymentsService] PaymentIntent não encontrado para orderId=${orderId} qrId=${qr?.id}`,
         );
         return { message: 'PaymentIntent not found for order webhook' };
+      }
+
+      // Se já está pago e tentando reprocessar, sai cedo
+      if (intent.status === PaymentIntentStatus.PAID && qrStatus === 'PAID') {
+        return { message: 'already paid' };
+      }
+
+      // Validar valor pago (quando presente)
+      const qrAmountValue = qr?.amount?.value as number | undefined;
+      if (qrAmountValue && intent.amountCents && qrAmountValue !== intent.amountCents) {
+        this.logger.warn(
+          `[PaymentsService] handlePixWebhook amount mismatch order=${orderId} expected=${intent.amountCents} got=${qrAmountValue}`,
+        );
+        return { message: 'amount mismatch' };
+      }
+
+      // Buscar booking para validar estado e eventual ledger
+      const booking =
+        intent.bookingId &&
+        (await this.prisma.booking.findUnique({
+          where: { id: intent.bookingId },
+          select: {
+            status: true,
+            totalPrice: true,
+            provider: { select: { userId: true } },
+          },
+        }));
+      const finalized =
+        booking &&
+        [BookingStatus.COMPLETED, BookingStatus.CANCELED, BookingStatus.REJECTED, BookingStatus.NO_SHOW].includes(
+          booking.status as any,
+        );
+      if (finalized) {
+        return { message: 'booking finalized; ignored' };
       }
 
       if (intentNewStatus) {
@@ -667,6 +711,23 @@ export class PaymentsService {
           bookingNewStatus,
           UserRole.ADMIN,
         );
+        // Criar ledger REFUND/CHARGEBACK para o provider quando aplicável
+        if (
+          booking &&
+          booking.provider?.userId &&
+          (intentNewStatus === PaymentIntentStatus.REFUNDED ||
+            intentNewStatus === PaymentIntentStatus.CHARGEBACK)
+        ) {
+          await this.prisma.ledgerEntry.create({
+            data: {
+              userId: booking.provider.userId,
+              bookingId: intent.bookingId,
+              amount: new Prisma.Decimal(-Number(booking.totalPrice || 0)),
+              type: LedgerEntryType.REFUND,
+              note: `Refund/chargeback booking ${intent.bookingId}`,
+            },
+          });
+        }
       }
 
       return { message: `Webhook processed for order ${orderId}.` };
