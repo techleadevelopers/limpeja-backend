@@ -18,7 +18,8 @@ import {
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
-} from '@nestjs/swagger';
+}
+ from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
 import {
   CreatePixChargeDto,

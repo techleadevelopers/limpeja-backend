@@ -50,6 +50,15 @@ export class CreatePixChargeDto {
 // DTO de resposta para a criação de uma cobrança PIX
 // Este DTO representa o que a API *retornará* para o cliente após a criação da cobrança.
 export class PixChargeResponseDto {
+  // ID interno do PaymentIntent (corrigido anteriormente)
+  @ApiProperty({
+    description: 'ID interno do PaymentIntent (referência principal no sistema)',
+    example: 'uuid-do-payment-intent',
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  id: string;
+  
   @ApiProperty({
     description: 'ID da ordem PagBank (ORDE_*)',
     example: 'ORDE_123',
@@ -66,14 +75,14 @@ export class PixChargeResponseDto {
   @IsNotEmpty()
   chargeId: string;
 
-    @ApiProperty({
-      enum: ['PENDING', 'WAITING', 'PAID', 'EXPIRED', 'CANCELED', 'FAILED'],
-      description: 'Status retornado pelo PagBank/intent.',
-      example: 'PENDING',
-    })
-    @IsEnum(['PENDING', 'WAITING', 'PAID', 'EXPIRED', 'CANCELED', 'FAILED'])
-    @IsNotEmpty()
-    status: 'PENDING' | 'WAITING' | 'PAID' | 'EXPIRED' | 'CANCELED' | 'FAILED';
+  @ApiProperty({
+    enum: ['PENDING', 'WAITING', 'PAID', 'EXPIRED', 'CANCELED', 'FAILED'],
+    description: 'Status retornado pelo PagBank/intent.',
+    example: 'PENDING',
+  })
+  @IsEnum(['PENDING', 'WAITING', 'PAID', 'EXPIRED', 'CANCELED', 'FAILED'])
+  @IsNotEmpty()
+  status: 'PENDING' | 'WAITING' | 'PAID' | 'EXPIRED' | 'CANCELED' | 'FAILED';
 
   @ApiProperty({
     description: 'Código PIX Copia e Cola (BR Code)',
@@ -89,7 +98,8 @@ export class PixChargeResponseDto {
   })
   @IsString()
   @IsNotEmpty()
-  qrCodeImageUrl: string;
+  // ✨ CORREÇÃO: Renomeado de qrCodeImageUrl para qrCodeUrl
+  qrCodeUrl: string; 
 
   @ApiProperty({
     description: 'Data e hora de expiração da cobrança no formato ISO 8601.',
@@ -104,6 +114,13 @@ export class PixChargeResponseDto {
   @Min(0.01)
   @IsNotEmpty()
   amount: number;
+  
+  // Valor em centavos (corrigido anteriormente)
+  @ApiProperty({ description: 'Valor da cobrança em centavos', example: 15075 })
+  @IsNumber()
+  @Min(1)
+  @IsNotEmpty()
+  amountCents: number;
 
   @ApiProperty({
     description: 'Descrição da cobrança PIX',

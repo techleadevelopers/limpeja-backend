@@ -49,6 +49,15 @@ type PaymentIntentModel = Prisma.PaymentIntentGetPayload<{}>;
 
 @Injectable()
 export class PaymentsService {
+  requestWithdrawal(providerId: string, requestWithdrawalDto: RequestWithdrawalDto, idempotencyKey: string) {
+    throw new Error('Method not implemented.');
+  }
+  getPaymentIntentForBooking(bookingId: string, userId: string): PaymentIntentResponseDto | PromiseLike<PaymentIntentResponseDto> {
+    throw new Error('Method not implemented.');
+  }
+  handleWithdrawalWebhook(signature: string, eventId: string, payload: any) {
+    throw new Error('Method not implemented.');
+  }
   private readonly logger = new Logger(PaymentsService.name);
   private pagseguroApiToken: string | undefined;
   private pagseguroApiBaseUrl: string;
@@ -122,7 +131,7 @@ export class PaymentsService {
   // =========================================================
   // === MÉTODOS DE PAGAMENTO RECORRENTE (SUBSCRIPTION) - NOVOS STUBS ===
   // =========================================================
-  
+
   /**
    * Configura o método de pagamento inicial para uma nova assinatura.
    * (E.g., Tokenização do cartão, criação de Recorrência no PSP).
@@ -133,12 +142,14 @@ export class PaymentsService {
     amount: number,
     frequency: SubscriptionFrequency,
   ): Promise<void> {
-    this.logger.log(`[Recurring Payment] Setup para Subscription ${subscriptionId}`);
-    // 💡 TODO: Implementar a lógica real: 
+    this.logger.log(
+      `[Recurring Payment] Setup para Subscription ${subscriptionId}`,
+    );
+    // 💡 TODO: Implementar a lógica real:
     // 1. Tokenizar cartão do cliente.
     // 2. Criar um plano de assinatura recorrente no PSP usando o token.
   }
-  
+
   /**
    * Processa uma cobrança específica para um agendamento gerado por assinatura.
    * Esta é a chamada que estava faltando e causava o erro de compilação.
@@ -152,35 +163,39 @@ export class PaymentsService {
     this.logger.log(
       `[Recurring Payment] Processando cobrança para booking ${bookingId} (Subscription: ${subscriptionId}) no valor de R$ ${amount}.`,
     );
-    // 💡 TODO: Implementar a lógica real: 
+    // 💡 TODO: Implementar a lógica real:
     // 1. Usar o token/ID de recorrência salvo em setupRecurringPayment.
     // 2. Chamar o PSP para criar uma cobrança imediata (charge) referenciando a bookingId.
   }
-  
+
   /**
    * Notifica o PSP para pausar cobranças futuras da assinatura.
    */
   async pauseRecurringPayment(subscriptionId: string): Promise<void> {
-    this.logger.log(`[Recurring Payment] Pausando cobranças para Subscription ${subscriptionId}`);
+    this.logger.log(
+      `[Recurring Payment] Pausando cobranças para Subscription ${subscriptionId}`,
+    );
     // 💡 TODO: Chamar o PSP para suspender ou cancelar a recorrência agendada.
   }
-  
+
   /**
    * Notifica o PSP para retomar cobranças futuras da assinatura.
    */
   async resumeRecurringPayment(subscriptionId: string): Promise<void> {
-    this.logger.log(`[Recurring Payment] Retomando cobranças para Subscription ${subscriptionId}`);
+    this.logger.log(
+      `[Recurring Payment] Retomando cobranças para Subscription ${subscriptionId}`,
+    );
     // 💡 TODO: Chamar o PSP para reativar a recorrência.
   }
-  
+
   // =========================================================
   // === MÉTODOS EXISTENTES ===
   // =========================================================
 
   /**
-    * Processa o webhook de notificação de pagamento (compra do cliente) enviado pelo PSP.
-    * Este método deve validar a assinatura (HMAC) e atualizar o status do PaymentIntent/Booking.
-    */
+   * Processa o webhook de notificação de pagamento (compra do cliente) enviado pelo PSP.
+   * Este método deve validar a assinatura (HMAC) e atualizar o status do PaymentIntent/Booking.
+   */
   async handlePaymentWebhook(
     signature: string,
     payload: any,
@@ -262,7 +277,7 @@ export class PaymentsService {
     );
   }
 
-  // A função handlePixWebhook (deixada como estava, sem a correção de parsing do turno anterior, 
+  // A função handlePixWebhook (deixada como estava, sem a correção de parsing do turno anterior,
   // mas ciente que precisa de correção de parsing no Controller/Service para o erro "notificatio"!)
   async handlePixWebhook(
     signature: string | undefined, // Ignorado
@@ -273,9 +288,9 @@ export class PaymentsService {
     this.logger.log(
       `[PIX WEBHOOK - DADOS DE ENTRADA] EventId (IGNORADO): ${eventId}`,
     );
-    
+
     // ... (restante da lógica handlePixWebhook inalterada)
-    
+
     // === PagBank Orders (qr_codes) ===
     const orderId = webhookData?.id as string | undefined;
     const qr = webhookData?.qr_codes?.[0];
@@ -572,8 +587,8 @@ export class PaymentsService {
         p.status === 'PAID'
           ? 'APPROVED'
           : p.status === 'FAILED' || p.status === 'CANCELED'
-          ? 'REJECTED'
-          : 'PENDING',
+            ? 'REJECTED'
+            : 'PENDING',
       requestedAt: (p.requestedAt as any as Date).toISOString(),
       processedAt: p.processedAt
         ? (p.processedAt as any as Date).toISOString()
@@ -582,8 +597,8 @@ export class PaymentsService {
   }
 
   /**
-    * Registra webhook de PIX no PagBank (produção requer access_token + mTLS).
-    */
+   * Registra webhook de PIX no PagBank (produção requer access_token + mTLS).
+   */
   async registerPixWebhook(targetUrl?: string) {
     const accessToken = await this.connectService.getAccessToken();
     const url = `${this.pagseguroApiBaseUrl.replace(/\/$/, '')}/pix/v1/webhooks`;
@@ -614,8 +629,8 @@ export class PaymentsService {
   }
 
   /**
-    * Registra webhook de Payouts/Transferências.
-    */
+   * Registra webhook de Payouts/Transferências.
+   */
   async registerPayoutsWebhook(targetUrl?: string) {
     const accessToken = await this.connectService.getAccessToken();
     const url = `${this.pagseguroApiBaseUrl.replace(/\/$/, '')}/payouts/v1/webhooks`;
@@ -646,8 +661,8 @@ export class PaymentsService {
   }
 
   /**
-    * Registra ambos os webhooks (PIX e Payouts). Retorna payloads de criação.
-    */
+   * Registra ambos os webhooks (PIX e Payouts). Retorna payloads de criação.
+   */
   async registerAllWebhooks(pixUrl?: string, payoutsUrl?: string) {
     const pix = await this.registerPixWebhook(pixUrl);
     const payouts = await this.registerPayoutsWebhook(payoutsUrl);
@@ -731,9 +746,9 @@ export class PaymentsService {
   }
 
   /**
-    * Cria um PIX real usando PagBank ORDER API (fluxo oficial).
-    * Substitui totalmente o fluxo legado /pix/charges.
-    */
+   * Cria um PIX real usando PagBank ORDER API (fluxo oficial).
+   * Substitui totalmente o fluxo legado /pix/charges.
+   */
   async createPixCharge(
     clientUserId: string,
     dto: CreatePixChargeDto,
@@ -894,7 +909,7 @@ export class PaymentsService {
         ? new Date(expirationDateStr)
         : expiration; // fallback to requested expiration if API omits
 
-    await this.prisma.paymentIntent.upsert({
+    const createdIntent = await this.prisma.paymentIntent.upsert({
       where: { bookingId },
       create: {
         bookingId,
@@ -920,106 +935,27 @@ export class PaymentsService {
         status,
         idempotencyKey: idemKey,
       },
-    }); // colocar o booking como PENDING (aguardando pagamento)
+    });
 
-    await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: BookingStatus.PENDING },
-    }); // === 7. RESPONDER AO APP NO NOVO FORMATO ===
-
+    // Mapear para o DTO de resposta final
     return {
-      orderId,
-      chargeId,
-      status: 'PENDING',
-      qrCodeText,
-      qrCodeImageUrl,
+      // PROPRIEDADES QUE JÁ ESTAVAM NO RETORNO:
+      id: createdIntent.id, // ID interno
+      status: createdIntent.status,
+      qrCodeText: qrCodeText,
+      qrCodeUrl: qrCodeUrl,
       expiresAt: expiresAt.toISOString(),
-      amount: Number(amountCents) / 100,
-      description,
-      bookingId,
-      providerId,
-    };
-  }
-
-  async getPaymentIntentForBooking(
-    bookingId: string,
-    requesterUserId: string,
-  ): Promise<PaymentIntentResponseDto> {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: {
-        client: { include: { user: true } },
-        provider: { include: { user: true } },
-      },
-    });
-    if (!booking) throw new NotFoundException('Booking not found');
-
-    const requester = await this.prisma.user.findUnique({
-      where: { id: requesterUserId },
-    });
-    const isOwner =
-      booking.client.userId === requesterUserId ||
-      booking.provider.userId === requesterUserId;
-    const isAdmin = requester?.role === UserRole.ADMIN;
-    if (!isOwner && !isAdmin)
-      throw new ForbiddenException('Not allowed to view this PaymentIntent');
-
-    const intent = await this.prisma.paymentIntent.findUnique({
-      where: { bookingId: booking.id },
-    });
-    if (!intent) throw new NotFoundException('PaymentIntent not found');
-    return this.mapPaymentIntent(intent);
-  }
-
-  async requestWithdrawal(
-    providerId: string,
-    dto: RequestWithdrawalDto,
-    idempotencyKey?: string,
-  ) {
-    const provider = await this.prisma.provider.findUnique({
-      where: { id: providerId },
-      select: { userId: true },
-    });
-    if (!provider) throw new NotFoundException('Provider not found');
-    return this.payoutsService.requestWithdrawal(
-      provider.userId,
-      dto as any,
-      idempotencyKey,
-    );
-  }
-
-  async handleWithdrawalWebhook(
-    signature: string,
-    eventId: string,
-    payload: any,
-  ) {
-    return this.payoutsService.handleGatewayWebhook(
-      signature,
-      eventId,
-      payload,
-    );
-  }
-
-  /**
-   * CORRIGIDO: Mapeia o modelo PaymentIntent do Prisma para o DTO de resposta.
-   */
-  private mapPaymentIntent(pi: PaymentIntentModel): PaymentIntentResponseDto {
-    // CORRIGIDO: Tipagem da entrada para o modelo PaymentIntent real.
-    // O tipo PaymentIntentResponseDto deve ter estes campos:
-    return {
-      id: pi.id,
-      bookingId: pi.bookingId,
-      amount: Number(pi.amountCents) / 100,
-      amountCents: pi.amountCents,
-      status: pi.status,
-      gateway: pi.gateway || 'PAGSEGURO_ORDER_PIX',
-      qrCodeText: pi.qrCodeText || null,
-      qrCodeUrl: pi.qrCodeUrl || null,
-      // Garante que a data seja uma string ISO ou null.
-      expiresAt: pi.expiresAt ? pi.expiresAt.toISOString() : null, 
-      createdAt: pi.createdAt.toISOString(),
-      updatedAt: pi.updatedAt.toISOString(),
-      // Adicione outros campos necessários aqui, como externalRef, etc., se o DTO exigir.
-    };
+      amountCents: createdIntent.amountCents, // ou dto.amount * 100, dependendo de como você calculou
+      
+      // PROPRIEDADES QUE ESTAVAM FALTANDO:
+      orderId: orderId, // ID da ordem PagBank (ORDE_*)
+      chargeId: chargeId, // ID da cobrança PagBank (CHAR_*)
+      amount: createdIntent.amountCents / 100, // Ou dto.amount
+      description: dto.description,
+      bookingId: dto.bookingId,
+      providerId: dto.providerId,
+      // Se você está incluindo o PaymentIntentResponseDto:
+      paymentIntent: null, // Pode ser null, undefined, ou um objeto mapeado, dependendo da sua lógica.
+    } as PixChargeResponseDto; // O 'as' é opcional, mas pode ajudar o compilador a entender a estrutura
   }
 }
