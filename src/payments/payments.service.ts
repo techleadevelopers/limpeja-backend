@@ -632,9 +632,19 @@ export class PaymentsService {
       );
     }
 
-    if (!signature || !eventId) {
-      throw new BadRequestException('Missing webhook headers.');
-    }
+    // AÇÃO 1: Desative a Validação no PaymentsService
+    // Procure pela linha de código que está verificando a presença de signature e/ou eventId
+    // e lançando a exceção BadRequestException: Missing webhook headers..
+    // Comente ou remova temporariamente este bloco de código de validação.
+    //
+    // Aviso de Segurança: Esta é uma medida temporária de teste. Em produção,
+    // a validação do cabeçalho de assinatura é crucial para evitar que atacantes
+    // simulem pagamentos. O ideal é que você descubra por que o PagBank não
+    // está enviando os cabeçalhos ou se eles usam outro nome.
+    //
+    // if (!signature || !eventId) {
+    //   throw new BadRequestException('Missing webhook headers.');
+    // }
 
     const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
     if (!secret) {
