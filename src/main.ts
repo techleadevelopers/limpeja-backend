@@ -6,7 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as admin from 'firebase-admin';
 import * as path from 'path';
-import { json, urlencoded } from 'express';
+import { json, urlencoded } from 'express'; // Importante manter json e urlencoded
 import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import * as process from 'process';
@@ -41,21 +41,31 @@ async function bootstrap() {
     );
   }
 
-  // Captura o rawBody para validação de webhooks (ex.: HMAC)
-  app.use(
-    json({
-      limit: '10mb',
-      // Anexa o buffer original na requisição
-      verify: (req: any, _res, buf: Buffer) => {
-        try {
-          // CORREÇÃO (Simplificação): Usa o buffer diretamente
-          req.rawBody = buf; 
-        } catch {
-          // ignora
-        }
-      },
-    }),
-  );
+  // 🚨 CORREÇÃO CRÍTICA: Middleware para capturar o rawBody APENAS na rota do webhook
+  // Isso evita conflitos globais de body-parser com o proxy do Railway/PagBank.
+  app.use((req: any, res, next) => {
+    // 🛑 Verifica o URL original para garantir que é o webhook do PIX
+    // É importante usar .includes() pois o Railway pode adicionar prefixos
+    if (req.originalUrl.includes('/payments/webhook/pix')) {
+      req.setEncoding('latin1');
+      let data = '';
+      req.on('data', (chunk) => {
+        data += chunk;
+      });
+      req.on('end', () => {
+        // Armazena o corpo bruto como um Buffer
+        req.rawBody = Buffer.from(data, 'latin1'); 
+        next(); // Passa para o próximo middleware
+      });
+    } else {
+      // Para todas as outras rotas, pulamos este middleware
+      next();
+    }
+  });
+
+  // Aplica o body-parser JSON e URL-ENCODED normais para as outras rotas
+  // Isso DEVE vir DEPOIS do middleware customizado acima.
+  app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
   const allowedOrigins = [

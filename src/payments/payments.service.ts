@@ -448,7 +448,7 @@ export class PaymentsService {
         },
       ],
       // 🛑 USE ESTA LINHA CORRIGIDA (Descomentada e corrigida para 'pix')
-      notification_urls: [`https://webhook.site/ca2e5bb8-833e-467a-9736-ed8d0fd53609`],
+      notification_urls: [`${this.appBaseUrl}/payments/webhook/pix`],
     }; // === 4. CHAMAR PAGSEGURO ORDER API ===
 
     const url = `${pagseguroBase}/orders`;
