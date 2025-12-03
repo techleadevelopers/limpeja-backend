@@ -190,7 +190,7 @@ export class PaymentsController {
 
   /**
    * Webhook de PIX para receber notificações de pagamento do PagBank.
-   * 🛑 SEM VERIFICAÇÃO DE SEGURANÇA HMAC.
+   * 🛑 SEM VERIFICAÇÃO DE SEGURANÇA HMAC, RAW BODY ou eventId.
    */
   @Post('webhook/pix')
   @HttpCode(HttpStatus.OK) // Retorna status 200 OK para o PSP
@@ -203,21 +203,21 @@ export class PaymentsController {
     description: 'Webhook recebido e processado.',
   })
   async handlePixWebhook(
-    // 🛑 REMOVIDA A LEITURA DO x-signature AQUI
-    @Headers('x-event-id') eventId: string, // MANTENDO APENAS O eventId, se necessário
     @Body() webhookData: any, // Corpo da requisição com os dados do webhook
-    @Req() req: Request, // Mantido apenas para acessar o objeto de requisição (se necessário)
+    @Req() req: Request,
   ): Promise<MessageResponseDto> {
+    
     this.logger.log(
-      `[WEBHOOK PIX - PORTA DE ENTRADA] Tentativa de acesso. EventID: ${eventId || 'N/A'}.`,
+      `[WEBHOOK PIX - PORTA DE ENTRADA] Tentativa de acesso. ID do Evento Ignorado.`,
     );
 
     try {
+      // Chamando o service sem eventId, signature ou rawBody, garantindo undefined.
       return await this.paymentsService.handlePixWebhook(
-        undefined, // Passando undefined para 'signature' (desativando verificação HMAC)
-        eventId, // Passando o eventId
+        undefined, // signature
+        undefined, // eventId
         webhookData,
-        undefined, // Passando undefined para 'rawBody' (desativando verificação HMAC)
+        undefined, // rawBody
       );
     } catch (error: any) {
       this.logger.error(

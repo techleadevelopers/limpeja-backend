@@ -577,7 +577,7 @@ export class PayoutsService {
 
     // 🛑 LÓGICA DE SEGURANÇA (SECRET, SIGNATURE, HMAC) FOI REMOVIDA AQUI
 
-    const exists = await this.prisma.webhookReplay.findUnique({
+    const exists = await this.prisma.webhookReplay.findFirst({
       where: { eventId },
     });
     if (exists) {

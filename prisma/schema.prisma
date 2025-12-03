@@ -1027,7 +1027,7 @@ model Payout {
 model WebhookReplay {
   id      String   @id @default(cuid())
   source  String
-  eventId String   @unique
+  eventId String
   seenAt  DateTime @default(now())
 }
 

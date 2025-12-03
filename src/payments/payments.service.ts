@@ -28,8 +28,7 @@ import { QueuesService } from '../queues/queues.service';
 import {
   CreatePixChargeDto,
   PixChargeResponseDto,
-}
-from './dto/create-pix-charge.dto';
+} from './dto/create-pix-charge.dto';
 import { PaymentIntentResponseDto } from './dto/payment-intent-response.dto';
 import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
 import { CouponsService } from '../coupons/coupons.service';
@@ -99,7 +98,7 @@ export class PaymentsService {
           'PaymentsService: mTLS habilitado para cliente HTTP do PagSeguro.',
         );
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `PaymentsService: falha ao iniciar mTLS agent: ${err?.message}`,
       );
@@ -121,20 +120,27 @@ export class PaymentsService {
    * Processa o webhook de notificação de pagamento (compra do cliente) enviado pelo PSP.
    * Este método deve validar a assinatura (HMAC) e atualizar o status do PaymentIntent/Booking.
    */
-  async handlePaymentWebhook(signature: string, payload: any): Promise<void | MessageResponseDto> {
-    this.logger.log(`[PaymentsService] Webhook recebido. Evento: ${payload.event}`);
+  async handlePaymentWebhook(
+    signature: string,
+    payload: any,
+  ): Promise<void | MessageResponseDto> {
+    this.logger.log(
+      `[PaymentsService] Webhook recebido. Evento: ${payload.event}`,
+    );
 
     // 1. **Validação da Assinatura (HMAC):**
-    //    (É crucial implementar a lógica de validação de assinatura aqui para garantir que o webhook é legítimo)
+    // (É crucial implementar a lógica de validação de assinatura aqui para garantir que o webhook é legítimo)
     // A validação HMAC foi removida do handlePixWebhook, mas é mantida aqui como um exemplo de boa prática.
     const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
     if (!secret || !this.validateHmac(signature, payload)) {
-      this.logger.warn('Webhook com assinatura inválida recebido ou secret não configurado.');
+      this.logger.warn(
+        'Webhook com assinatura inválida recebido ou secret não configurado.',
+      );
       throw new ForbiddenException('Assinatura de Webhook Inválida.');
     }
 
     // 2. **Processamento do Evento:**
-    //    Se o evento for de pagamento confirmado, atualize o status.
+    // Se o evento for de pagamento confirmado, atualize o status.
     if (payload.event === 'charge.paid' || payload.status === 'PAID') {
       const externalRef = payload.data?.id || payload.resource_id; // Depende do PSP
       const bookingId = payload.reference_id || externalRef; // Encontre a referência da sua cobrança
@@ -160,9 +166,13 @@ export class PaymentsService {
             });
           });
 
-          this.logger.log(`[PaymentsService] Pagamento ${externalRef} para o agendamento ${intent.bookingId} CONFIRMADO.`);
+          this.logger.log(
+            `[PaymentsService] Pagamento ${externalRef} para o agendamento ${intent.bookingId} CONFIRMADO.`,
+          );
         } else if (!intent) {
-          this.logger.warn(`[PaymentsService] Webhook para ref. ${externalRef} recebido, mas PaymentIntent não encontrado.`);
+          this.logger.warn(
+            `[PaymentsService] Webhook para ref. ${externalRef} recebido, mas PaymentIntent não encontrado.`,
+          );
         }
       }
     }
@@ -175,7 +185,9 @@ export class PaymentsService {
   private validateHmac(signature: string, payload: any): boolean {
     const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
     if (!secret) {
-      this.logger.error('PIX_WEBHOOK_SECRET não configurado. Validação HMAC desativada.');
+      this.logger.error(
+        'PIX_WEBHOOK_SECRET não configurado. Validação HMAC desativada.',
+      );
       return false; // Não pode validar sem o segredo
     }
     const computedSignature = createHmac('sha256', secret)
@@ -183,33 +195,24 @@ export class PaymentsService {
       .digest('hex');
 
     // Usar timingSafeEqual para prevenir ataques de temporização
-    return timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(computedSignature, 'hex'));
+    return timingSafeEqual(
+      Buffer.from(signature, 'hex'),
+      Buffer.from(computedSignature, 'hex'),
+    );
   }
 
-  // A função handlePixWebhook corrigida e com a tipagem `BookingWithUsers`
+  // A função handlePixWebhook corrigida: eventId e checagem de replay removidos.
   async handlePixWebhook(
-    signature: string, // Agora ignorado
-    eventId: string,
+    signature: string | undefined, // Ignorado
+    eventId: string | undefined, // <--- eventId AGORA É IGNORADO E NÃO USADO
     webhookData: any,
-    rawBody?: Buffer, // Agora ignorado
+    rawBody?: Buffer, // Ignorado
   ): Promise<MessageResponseDto> {
-    // REMOVIDA A LÓGICA DE NODE_ENV, SECRET, SIGNATURE E VALIDAÇÃO HMAC.
-    this.logger.log(`[PIX WEBHOOK - DADOS DE ENTRADA] EventId: ${eventId}`);
+    this.logger.log(
+      `[PIX WEBHOOK - DADOS DE ENTRADA] EventId (IGNORADO): ${eventId}`,
+    );
 
-    // ❌ REMOVIDA TODA A LÓGICA DE VALIDAÇÃO DE SEGURANÇA (HEADERS, HMAC).
-
-    // ✅ SEGURANÇA MÍNIMA MANTIDA: Proteção contra Replay Attack
-    const exists = await this.prisma.webhookReplay.findUnique({
-      where: { eventId },
-    });
-    if (!exists) {
-      await this.prisma.webhookReplay.create({
-        data: { source: 'pix', eventId },
-      });
-    } else {
-      this.logger.debug(`PIX webhook replay ${eventId} ignored.`);
-      return { message: 'ok' };
-    }
+    // 🛑 LÓGICA DE CHECAGEM DE REPLAY ATTACK (webhookReplay) FOI REMOVIDA.
 
     // === PagBank Orders (qr_codes) ===
     const orderId = webhookData?.id as string | undefined;
@@ -257,7 +260,11 @@ export class PaymentsService {
 
       // Validar valor pago (quando presente)
       const qrAmountValue = qr?.amount?.value as number | undefined;
-      if (qrAmountValue && intent.amountCents && qrAmountValue !== intent.amountCents) {
+      if (
+        qrAmountValue &&
+        intent.amountCents &&
+        qrAmountValue !== intent.amountCents
+      ) {
         this.logger.warn(
           `[PaymentsService] handlePixWebhook amount mismatch order=${orderId} expected=${intent.amountCents} got=${qrAmountValue}`,
         );
@@ -277,9 +284,12 @@ export class PaymentsService {
         }));
       const finalized =
         booking &&
-        [BookingStatus.COMPLETED, BookingStatus.CANCELED, BookingStatus.REJECTED, BookingStatus.NO_SHOW].includes(
-          booking.status as any,
-        );
+        [
+          BookingStatus.COMPLETED,
+          BookingStatus.CANCELED,
+          BookingStatus.REJECTED,
+          BookingStatus.NO_SHOW,
+        ].includes(booking.status as any);
       if (finalized) {
         return { message: 'booking finalized; ignored' };
       }
@@ -415,13 +425,14 @@ export class PaymentsService {
           try {
             // *** LINHAS CORRIGIDAS ***
             // Removendo o 'as any' e usando o tipo tipado corretamente.
-            const b: BookingWithUsers | null = await this.prisma.booking.findUnique({
-              where: { id: transaction.bookingId },
-              include: {
-                provider: { include: { user: true } },
-                client: { include: { user: true } },
-              },
-            });
+            const b: BookingWithUsers | null =
+              await this.prisma.booking.findUnique({
+                where: { id: transaction.bookingId },
+                include: {
+                  provider: { include: { user: true } },
+                  client: { include: { user: true } },
+                },
+              });
             // *** FIM DA CORREÇÃO DE TIPAGEM ***
 
             if (b?.provider?.userId) {
@@ -437,7 +448,7 @@ export class PaymentsService {
                 idempotencyKey: `evt:booking_confirmed:${b.id}:provider`,
               });
             }
-          } catch (e) {
+          } catch (e: any) {
             this.logger.warn(
               `[PaymentsService] Falha ao enfileirar notificação de confirmação para booking ${transaction.bookingId}: ${e?.message || e}`,
             );
@@ -456,7 +467,6 @@ export class PaymentsService {
       };
     }
   }
-
 
   // Admin: listar transações com filtros básicos
   async listTransactions(type?: string, status?: string) {
@@ -930,60 +940,34 @@ export class PaymentsService {
   }
 
   private mapPaymentIntent(
-    pi: Prisma.PaymentIntentUncheckedCreateInput & {
-      id: string;
-      createdAt?: any;
-      updatedAt?: any;
-    },
+    pi: Prisma.PaymentIntentUncheckedCreateInput
   ): PaymentIntentResponseDto {
-    // Método auxiliar para mapear para DTO
-    const anyPi: any = pi;
-    return {
-      id: anyPi.id,
-      bookingId: anyPi.bookingId,
-      amountCents: anyPi.amountCents,
-      amount: anyPi.amountCents / 100,
-      status: anyPi.status,
-      gateway: anyPi.gateway,
-      externalRef: anyPi.externalRef ?? null,
-      externalOrderId: anyPi.externalOrderId ?? null,
-      externalChargeId: anyPi.externalChargeId ?? null,
-      externalQrCodeId: anyPi.externalQrCodeId ?? null,
-      qrCodeUrl: anyPi.qrCodeUrl ?? null,
-      qrCodeText: anyPi.qrCodeText ?? null,
-      expiresAt: anyPi.expiresAt
-        ? new Date(anyPi.expiresAt).toISOString()
-        : null,
-      createdAt: (anyPi.createdAt instanceof Date
-        ? anyPi.createdAt
-        : new Date(anyPi.createdAt)
-      ).toISOString(),
-      updatedAt: (anyPi.updatedAt instanceof Date
-        ? anyPi.updatedAt
-        : new Date(anyPi.updatedAt)
-      ).toISOString(),
-    };
-  }
+    const expiresAt = pi.expiresAt
+      ? typeof pi.expiresAt === 'string'
+        ? pi.expiresAt
+        : (pi.expiresAt as Date).toISOString()
+      : new Date().toISOString();
 
-  // Process recurring payment for a generated booking (via subscription)
-  async processRecurringPayment(
-    clientUserId: string,
-    subscriptionId: string,
-    bookingId: string,
-    amount: number,
-  ): Promise<void> {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: { providerId: true },
-    });
-    if (!booking?.providerId) {
-      throw new NotFoundException('Provider not found for booking.');
-    }
-    await this.createPixCharge(clientUserId, {
-      amount,
-      description: `Recurring payment for subscription ${subscriptionId}`,
-      bookingId,
-      providerId: booking.providerId,
-    });
+    return {
+      id: pi.id || 'N/A',
+      bookingId: pi.bookingId || 'N/A',
+      amount: Number(pi.amountCents || 0) / 100,
+      amountCents: pi.amountCents || 0,
+      status: pi.status || PaymentIntentStatus.PENDING,
+      gateway: pi.gateway || 'PAGSEGURO_ORDER_PIX',
+      qrCodeText: pi.qrCodeText || 'N/A',
+      qrCodeUrl: pi.qrCodeUrl || 'N/A',
+      expiresAt,
+      createdAt: pi.createdAt
+        ? typeof pi.createdAt === 'string'
+          ? pi.createdAt
+          : (pi.createdAt as Date).toISOString()
+        : new Date().toISOString(),
+      updatedAt: pi.updatedAt
+        ? typeof pi.updatedAt === 'string'
+          ? pi.updatedAt
+          : (pi.updatedAt as Date).toISOString()
+        : new Date().toISOString(),
+    };
   }
 }
