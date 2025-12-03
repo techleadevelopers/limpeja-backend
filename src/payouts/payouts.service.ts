@@ -604,7 +604,7 @@ export class PayoutsService {
       this.logger.log(
         `[PayoutsService] Delegando evento '${eventType}' para PaymentsService.handlePixPaymentWebhook.`,
       );
-      await this.paymentsService.handlePixPaymentWebhook(payload);
+      await this.paymentsService.handlePixWebhook(signature, eventId, payload);
       return { ok: true }; // Termina o processamento aqui
     }
 

@@ -1,4 +1,5 @@
 // src/payments/payments.controller2.ts
+
 import {
   Controller,
   Get,
@@ -95,6 +96,18 @@ export class PaymentsController {
       clientUserId,
       createPixChargeDto,
     );
+  }
+
+  // Rota pública para receber notificações de pagamento do PSP
+  @Post('webhook') // OU 'notification', 'payment-notification', etc.
+  @HttpCode(HttpStatus.OK) // Responda 200/204 para o PSP imediatamente.
+  @ApiOperation({ summary: 'Recebe notificações de PAGAMENTO (Compra) do PSP (Webhook)' })
+  async handlePaymentWebhook(@Headers('x-signature') signature: string, @Body() payload: any) {
+    this.logger.log('Webhook de Pagamento Recebido');
+
+    // CHAMADA CORRETA: O nome do método deve existir no PaymentsService.
+    // Vamos usar 'handlePaymentWebhook' para consistência.
+    return this.paymentsService.handlePaymentWebhook(signature, payload);
   }
 
   // Recupera PaymentIntent por booking

@@ -1,4 +1,5 @@
 ﻿// src/payments/payments.service.ts
+
 import {
   BadRequestException,
   Injectable,
@@ -17,8 +18,7 @@ import {
   TransactionType,
   UserRole,
   LedgerEntryType,
-}
- from '@prisma/client';
+} from '@prisma/client';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { createHmac, timingSafeEqual } from 'crypto';
 import axios from 'axios';
@@ -35,7 +35,6 @@ import { PaymentIntentResponseDto } from './dto/payment-intent-response.dto';
 import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
 import { CouponsService } from '../coupons/coupons.service';
 import { PayoutsService } from '../payouts/payouts.service';
-
 import { ConnectService } from '../connect/connect.service';
 
 @Injectable()
@@ -65,6 +64,7 @@ export class PaymentsService {
     );
     this.appBaseUrl =
       this.configService.get<string>('API_BASE_URL') || undefined;
+
     try {
       const certPath = this.configService.get<string>(
         'PAGSEGURO_MTLS_CERT_PATH',
@@ -109,84 +109,69 @@ export class PaymentsService {
     }
   }
 
-  // NOVO MÉTODO: Trata o Webhook de sucesso de pagamento PIX (Order Paid)
-  async handlePixPaymentWebhook(payload: any): Promise<void> {
-    this.logger.log(
-      `[PaymentsService] Webhook PIX recebido. Evento: ${payload.event}`,
-    );
+  /**
+   * Processa o webhook de notificação de pagamento (compra do cliente) enviado pelo PSP.
+   * Este método deve validar a assinatura (HMAC) e atualizar o status do PaymentIntent/Booking.
+   */
+  async handlePaymentWebhook(signature: string, payload: any): Promise<void | MessageResponseDto> {
+    this.logger.log(`[PaymentsService] Webhook recebido. Evento: ${payload.event}`);
 
-    // 1. Validação Simples (O PagBank usa 'order.paid' para sucesso)
-    if (payload.event !== 'order.paid' || !payload.reference_id) {
-      this.logger.warn(
-        `[PaymentsService] Webhook PIX ignorado (evento ou ref. inválida): ${payload.event}`,
-      );
-      return;
+    // 1. **Validação da Assinatura (HMAC):**
+    //    (É crucial implementar a lógica de validação de assinatura aqui para garantir que o webhook é legítimo)
+    const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
+    if (!this.validateHmac(signature, payload)) {
+      this.logger.warn('Webhook com assinatura inválida recebido.');
+      throw new ForbiddenException('Assinatura de Webhook Inválida.');
     }
 
-    const paymentIntentId = payload.reference_id;
-    const externalStatus = payload.status; // Deve ser 'PAID'
-    const externalOrderId = payload.order_id; // ID do Pedido do PagBank
+    // 2. **Processamento do Evento:**
+    //    Se o evento for de pagamento confirmado, atualize o status.
+    if (payload.event === 'charge.paid' || payload.status === 'PAID') {
+      const externalRef = payload.data?.id || payload.resource_id; // Depende do PSP
+      const bookingId = payload.reference_id || externalRef; // Encontre a referência da sua cobrança
 
-    if (externalStatus !== 'PAID') {
-      this.logger.warn(
-        `[PaymentsService] Webhook PIX recebido, mas status não é PAID. Status: ${externalStatus}`,
-      );
-      return;
+      if (bookingId) {
+        // Encontre o PaymentIntent e Booking no seu banco de dados
+        const intent = await this.prisma.paymentIntent.findFirst({
+          where: { externalRef: externalRef },
+          include: { booking: true },
+        });
+
+        if (intent && intent.status !== PaymentIntentStatus.PAID) {
+          // Lógica para atualizar PaymentIntent e Booking para PAID
+          await this.prisma.$transaction(async (tx) => {
+            await tx.paymentIntent.update({
+              where: { id: intent.id },
+              data: { status: PaymentIntentStatus.PAID },
+            });
+
+            await tx.booking.update({
+              where: { id: intent.bookingId },
+              data: { status: BookingStatus.CONFIRMED },
+            });
+          });
+
+          this.logger.log(`[PaymentsService] Pagamento ${externalRef} para o agendamento ${intent.bookingId} CONFIRMADO.`);
+        } else if (!intent) {
+          this.logger.warn(`[PaymentsService] Webhook para ref. ${externalRef} recebido, mas PaymentIntent não encontrado.`);
+        }
+      }
     }
 
-    // 2. Encontrar PaymentIntent e executar em transação
-    const paymentIntent = await this.prisma.paymentIntent.findUnique({
-      where: { id: paymentIntentId },
-      select: { bookingId: true, status: true },
-    });
-
-    if (!paymentIntent) {
-      this.logger.error(
-        `[PaymentsService] PaymentIntent com ID ${paymentIntentId} não encontrada.`,
-      );
-      // Não lança exceção para não forçar retry no webhook.
-      return;
-    }
-
-    if (paymentIntent.status === PaymentIntentStatus.PAID) {
-      this.logger.log(
-        `[PaymentsService] PaymentIntent ${paymentIntentId} já está PAID. Ignorando.`,
-      );
-      return;
-    }
-
-    // 3. Executar as atualizações (PaymentIntent e Booking) atomicamente
-    await this.prisma.$transaction(async (tx) => {
-      // A. Atualiza a PaymentIntent para PAGA
-      await tx.paymentIntent.update({
-        where: { id: paymentIntentId },
-        data: {
-          status: PaymentIntentStatus.PAID,
-          updatedAt: new Date(),
-          externalOrderId: externalOrderId,
-        },
-      });
-
-      // B. Atualiza o Booking para CONFIRMADO (TRECHO CORRIGIDO!)
-      await tx.booking.update({
-        where: { id: paymentIntent.bookingId },
-        data: {
-          status: BookingStatus.CONFIRMED,
-          updatedAt: new Date(),
-        },
-      });
-
-      // ⚠️ CHAMAR O BOOKING SERVICE PARA NOTIFICAÇÕES E OUTRAS REGRAS
-      // Você deve adaptar esta parte para garantir que o BookingsService finalize o processo
-      // de agendamento (ex: enviar notificação de confirmação ao cliente/provedor).
-      // Se não houver uma função que aceita a transação, você pode criar uma simples:
-      // await this.bookingsService.confirmBooking(paymentIntent.bookingId);
-      // Mas a atualização acima já resolve o mínimo necessário (status no banco).
-      this.logger.log(
-        `[PaymentsService] PIX ${paymentIntentId} confirmado. Booking ${paymentIntent.bookingId} atualizado para CONFIRMED.`,
-      );
-    });
+    // O PSP espera um código 200 OK
+    return { message: 'Webhook processado com sucesso' };
   }
+
+  // Função de validação HMAC
+  private validateHmac(signature: string, payload: any): boolean {
+    const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
+    const hmac = createHmac('sha256', secret);
+    const computedSignature = hmac.update(JSON.stringify(payload)).digest('hex');
+
+    return timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(computedSignature, 'hex'));
+  }
+
+  // Outros métodos do serviço...
 
   // Admin: listar transações com filtros básicos
   async listTransactions(type?: string, status?: string) {

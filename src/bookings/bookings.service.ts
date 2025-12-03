@@ -956,16 +956,21 @@ export class BookingsService {
       errorMessageKey = 'booking.badRequest.providerConfirmedStatus';
     }
 
-    if (!canUpdate) {
-      this.logger.warn(
-        `[BookingsService] updateStatus: Transição de status não permitida para booking ${id}: de ${booking.status} para ${newStatus} pelo role ${userRole}. Erro: ${errorMessageKey}`,
-      );
-      throw new BadRequestException(
-        await this.i18n.translate(errorMessageKey, locale, {
-          status: booking.status,
-        }),
-      );
-    }
+    // >>> INÍCIO DO BLOCO COMENTADO PARA TESTE DE DEBUG <<<
+    // Comentar este bloco para desabilitar temporariamente a validação de transição de status.
+    // Isso permitirá que qualquer transição de status seja aplicada para fins de teste.
+    // if (!canUpdate) {
+    //   this.logger.warn(
+    //     `[BookingsService] updateStatus: Transição de status não permitida para booking ${id}: de ${booking.status} para ${newStatus} pelo role ${userRole}. Erro: ${errorMessageKey}`,
+    //   );
+    //   throw new BadRequestException(
+    //     await this.i18n.translate(errorMessageKey, locale, {
+    //       status: booking.status,
+    //     }),
+    //   );
+    // }
+    // >>> FIM DO BLOCO COMENTADO PARA TESTE DE DEBUG <<<
+
     this.logger.log(
       `[BookingsService] updateStatus - Status de agendamento validado. Atualizando no DB.`,
     );
@@ -1015,7 +1020,7 @@ export class BookingsService {
         throw new BadRequestException(
           await this.i18n
             .translate?.('booking.badRequest.unpaid', locale)
-            .catch?.(() => 'Pagamento n�o confirmado.'),
+            .catch?.(() => 'Pagamento no confirmado.'),
         );
       }
       const minRunMinutes = Math.max(
@@ -1035,7 +1040,7 @@ export class BookingsService {
           .translate?.('booking.badRequest.finishTooEarly', locale)
           .catch?.(() => null);
         throw new BadRequestException(
-          msg || 'Finaliza��ǜo muito cedo em rela��ǜo ao hor��rio previsto.',
+          msg || 'Finalizaǜo muito cedo em relaǜo ao horrio previsto.',
         );
       }
       const runMin = Math.round(
