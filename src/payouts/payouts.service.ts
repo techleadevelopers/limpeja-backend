@@ -5,7 +5,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef, // ADICIONADO
+  Inject, // ADICIONADO
 } from '@nestjs/common';
+import { PaymentsService } from '../payments/payments.service'; // ADICIONADO
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
 import {
@@ -51,6 +54,8 @@ export class PayoutsService {
     private readonly redisLock: RedisLockService,
     private readonly configService: ConfigService,
     private readonly connectService: ConnectService,
+    @Inject(forwardRef(() => PaymentsService)) // ADICIONADO: Injeção de PaymentsService
+    private readonly paymentsService: PaymentsService, // ADICIONADO: Injeção de PaymentsService
   ) {
     const min = this.configService.get<string>('MIN_WITHDRAWAL_AMOUNT', '10');
     this.minWithdrawal = new Prisma.Decimal(min);
@@ -555,6 +560,11 @@ export class PayoutsService {
   }
 
   async handleGatewayWebhook(signature: string, eventId: string, payload: any) {
+    this.logger.log(
+      `[PayoutsService] Webhook recebido - Evento: ${payload.event}, Tipo: ${payload.type}`,
+    );
+
+    // 1. Lógica de validação de segurança (DEVE SER MANTIDA AQUI)
     if (!eventId) {
       throw new BadRequestException('Missing webhook event identifier.');
     }
@@ -586,6 +596,23 @@ export class PayoutsService {
       data: { source: 'psp', eventId },
     });
 
+    // 2. LÓGICA DE ROTEAMENTO (ADICIONADO ESTE TRECHO)
+    const eventType = payload.type || '';
+
+    if (eventType === 'ORDER' || payload.event?.startsWith('order.')) {
+      // Se for um evento de Pedido (Pagamento PIX/Cartão), DELEGAR para o PaymentsService
+      this.logger.log(
+        `[PayoutsService] Delegando evento '${eventType}' para PaymentsService.handlePixPaymentWebhook.`,
+      );
+      await this.paymentsService.handlePixPaymentWebhook(payload);
+      return { ok: true }; // Termina o processamento aqui
+    }
+
+    // 3. CONTINUAÇÃO DA LÓGICA DE REPASSE (Sua lógica existente)
+    this.logger.log(
+      '[PayoutsService] Processando como Webhook de Repasse/Saque (Payout).',
+    );
+    // O restante da sua lógica original de Payout segue aqui.
     const { payoutId, status, gatewayTxnId } = payload ?? {};
     if (!payoutId || !status) {
       throw new BadRequestException(

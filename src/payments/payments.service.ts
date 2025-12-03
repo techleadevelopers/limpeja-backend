@@ -17,7 +17,8 @@ import {
   TransactionType,
   UserRole,
   LedgerEntryType,
-} from '@prisma/client';
+}
+ from '@prisma/client';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { createHmac, timingSafeEqual } from 'crypto';
 import axios from 'axios';
@@ -43,7 +44,7 @@ export class PaymentsService {
   private pagseguroApiToken: string | undefined;
   private pagseguroApiBaseUrl: string;
   private appBaseUrl: string | undefined;
-  private pagseguroHttpsAgent?: https.Agent; // property-injection para resolver o ciclo com BookingsService
+  private pagseguroHttpsAgent?: https.Agent;
 
   @Inject(forwardRef(() => BookingsService))
   private bookingsService!: BookingsService;
@@ -63,7 +64,7 @@ export class PaymentsService {
       'https://sandbox.api.pagseguro.com',
     );
     this.appBaseUrl =
-      this.configService.get<string>('API_BASE_URL') || undefined; // mTLS (opcional, exigido para PIX/Transfer em produção)
+      this.configService.get<string>('API_BASE_URL') || undefined;
     try {
       const certPath = this.configService.get<string>(
         'PAGSEGURO_MTLS_CERT_PATH',
@@ -106,8 +107,88 @@ export class PaymentsService {
         'API_BASE_URL ausente. Webhooks de PSP podem não funcionar externamente.',
       );
     }
-  } // Admin: listar transações com filtros básicos
+  }
 
+  // NOVO MÉTODO: Trata o Webhook de sucesso de pagamento PIX (Order Paid)
+  async handlePixPaymentWebhook(payload: any): Promise<void> {
+    this.logger.log(
+      `[PaymentsService] Webhook PIX recebido. Evento: ${payload.event}`,
+    );
+
+    // 1. Validação Simples (O PagBank usa 'order.paid' para sucesso)
+    if (payload.event !== 'order.paid' || !payload.reference_id) {
+      this.logger.warn(
+        `[PaymentsService] Webhook PIX ignorado (evento ou ref. inválida): ${payload.event}`,
+      );
+      return;
+    }
+
+    const paymentIntentId = payload.reference_id;
+    const externalStatus = payload.status; // Deve ser 'PAID'
+    const externalOrderId = payload.order_id; // ID do Pedido do PagBank
+
+    if (externalStatus !== 'PAID') {
+      this.logger.warn(
+        `[PaymentsService] Webhook PIX recebido, mas status não é PAID. Status: ${externalStatus}`,
+      );
+      return;
+    }
+
+    // 2. Encontrar PaymentIntent e executar em transação
+    const paymentIntent = await this.prisma.paymentIntent.findUnique({
+      where: { id: paymentIntentId },
+      select: { bookingId: true, status: true },
+    });
+
+    if (!paymentIntent) {
+      this.logger.error(
+        `[PaymentsService] PaymentIntent com ID ${paymentIntentId} não encontrada.`,
+      );
+      // Não lança exceção para não forçar retry no webhook.
+      return;
+    }
+
+    if (paymentIntent.status === PaymentIntentStatus.PAID) {
+      this.logger.log(
+        `[PaymentsService] PaymentIntent ${paymentIntentId} já está PAID. Ignorando.`,
+      );
+      return;
+    }
+
+    // 3. Executar as atualizações (PaymentIntent e Booking) atomicamente
+    await this.prisma.$transaction(async (tx) => {
+      // A. Atualiza a PaymentIntent para PAGA
+      await tx.paymentIntent.update({
+        where: { id: paymentIntentId },
+        data: {
+          status: PaymentIntentStatus.PAID,
+          updatedAt: new Date(),
+          externalOrderId: externalOrderId,
+        },
+      });
+
+      // B. Atualiza o Booking para CONFIRMADO (TRECHO CORRIGIDO!)
+      await tx.booking.update({
+        where: { id: paymentIntent.bookingId },
+        data: {
+          status: BookingStatus.CONFIRMED,
+          updatedAt: new Date(),
+        },
+      });
+
+      // ⚠️ CHAMAR O BOOKING SERVICE PARA NOTIFICAÇÕES E OUTRAS REGRAS
+      // Você deve adaptar esta parte para garantir que o BookingsService finalize o processo
+      // de agendamento (ex: enviar notificação de confirmação ao cliente/provedor).
+      // Se não houver uma função que aceita a transação, você pode criar uma simples:
+      // await this.bookingsService.confirmBooking(paymentIntent.bookingId);
+      // Mas a atualização acima já resolve o mínimo necessário (status no banco).
+      this.logger.log(
+        `[PaymentsService] PIX ${paymentIntentId} confirmado. Booking ${paymentIntent.bookingId} atualizado para CONFIRMED.`,
+      );
+    });
+  }
+
+  // Admin: listar transações com filtros básicos
   async listTransactions(type?: string, status?: string) {
     const where: Prisma.TransactionWhereInput = {};
     if (type) where.type = type as any;
@@ -131,8 +212,9 @@ export class PaymentsService {
       transactionRef: t.transactionRef,
       couponId: t.couponId,
     }));
-  } // Admin: listar saques (Payouts) com mapeamento simples
+  }
 
+  // Admin: listar saques (Payouts) com mapeamento simples
   async listWithdrawals(status?: string) {
     const where: Prisma.PayoutWhereInput = status
       ? { status: status as any }
@@ -156,10 +238,11 @@ export class PaymentsService {
         ? (p.processedAt as any as Date).toISOString()
         : null,
     }));
-  } /**
+  }
+
+  /**
    * Registra webhook de PIX no PagBank (produção requer access_token + mTLS).
    */
-
   async registerPixWebhook(targetUrl?: string) {
     const accessToken = await this.connectService.getAccessToken();
     const url = `${this.pagseguroApiBaseUrl.replace(/\/$/, '')}/pix/v1/webhooks`;
@@ -187,10 +270,11 @@ export class PaymentsService {
         e?.response?.data?.message || 'Falha ao registrar webhook de PIX.',
       );
     }
-  } /**
+  }
+
+  /**
    * Registra webhook de Payouts/Transferências.
    */
-
   async registerPayoutsWebhook(targetUrl?: string) {
     const accessToken = await this.connectService.getAccessToken();
     const url = `${this.pagseguroApiBaseUrl.replace(/\/$/, '')}/payouts/v1/webhooks`;
@@ -218,16 +302,18 @@ export class PaymentsService {
         e?.response?.data?.message || 'Falha ao registrar webhook de Payouts.',
       );
     }
-  } /**
+  }
+
+  /**
    * Registra ambos os webhooks (PIX e Payouts). Retorna payloads de criação.
    */
-
   async registerAllWebhooks(pixUrl?: string, payoutsUrl?: string) {
     const pix = await this.registerPixWebhook(pixUrl);
     const payouts = await this.registerPayoutsWebhook(payoutsUrl);
     return { pix, payouts };
-  } // Admin: aprovar saque (marca como PAID)
+  }
 
+  // Admin: aprovar saque (marca como PAID)
   async approveWithdrawal(id: string) {
     const payout = await this.prisma.payout.update({
       where: { id },
@@ -243,8 +329,9 @@ export class PaymentsService {
         ? (payout.processedAt as any as Date).toISOString()
         : null,
     };
-  } // Admin: rejeitar saque (marca como FAILED)
+  }
 
+  // Admin: rejeitar saque (marca como FAILED)
   async rejectWithdrawal(id: string, _reason?: string) {
     const payout = await this.prisma.payout.update({
       where: { id },
@@ -260,15 +347,17 @@ export class PaymentsService {
         ? (payout.processedAt as any as Date).toISOString()
         : null,
     };
-  } // Admin: iniciar reembolso de uma transação (simplificado)
+  }
 
+  // Admin: iniciar reembolso de uma transação (simplificado)
   async initiateRefund(transactionId: string, amount?: number) {
     const tx = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
     });
     if (!tx) throw new NotFoundException('Transaction not found');
     const refundAmount =
-      amount != null ? new Prisma.Decimal(amount) : tx.amount; // Criar transação de REFUND e marcar original como REFUNDED
+      amount != null ? new Prisma.Decimal(amount) : tx.amount;
+    // Criar transação de REFUND e marcar original como REFUNDED
     await this.prisma.transaction.update({
       where: { id: tx.id },
       data: { status: 'REFUNDED' },
@@ -298,11 +387,12 @@ export class PaymentsService {
       transactionRef: refund.transactionRef || undefined,
       couponId: refund.couponId || undefined,
     };
-  } /**
+  }
+
+  /**
    * Cria um PIX real usando PagBank ORDER API (fluxo oficial).
    * Substitui totalmente o fluxo legado /pix/charges.
    */
-
   async createPixCharge(
     clientUserId: string,
     dto: CreatePixChargeDto,
@@ -922,8 +1012,9 @@ export class PaymentsService {
         : new Date(anyPi.updatedAt)
       ).toISOString(),
     };
-  } // Process recurring payment for a generated booking (via subscription)
+  }
 
+  // Process recurring payment for a generated booking (via subscription)
   async processRecurringPayment(
     clientUserId: string,
     subscriptionId: string,
