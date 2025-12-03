@@ -617,6 +617,9 @@ export class PaymentsService {
     webhookData: any,
     rawBody?: Buffer,
   ): Promise<MessageResponseDto> {
+    // ADDED LOG: Início do processamento do webhook PIX com dados de entrada
+    this.logger.log(`[PIX WEBHOOK - DADOS DE ENTRADA] EventId: ${eventId} | Signature Header: ${signature}`);
+
     const nodeEnv = this.configService.get<string>('NODE_ENV') || 'development';
     this.logger.log(
       `[PaymentsService] handlePixWebhook - payload: ${JSON.stringify(webhookData)}`,
@@ -640,6 +643,14 @@ export class PaymentsService {
         'PIX_WEBHOOK_SECRET not configured. Skipping signature validation (non-production).',
       );
     } else {
+      // ADDED LOG: Verificação da presença e tamanho do rawBody
+      if (!rawBody) {
+          this.logger.error('[PIX WEBHOOK - ERRO CRÍTICO] rawBody está ausente ou undefined. Falha na configuração do NestJS/Proxy.');
+      } else {
+          this.logger.log(`[PIX WEBHOOK - VALIDANDO] rawBody Buffer LENGTH: ${rawBody.length} bytes.`);
+      }
+      // FIM ADDED LOG
+
       const incoming = signature?.startsWith('sha256=')
         ? signature.slice(7)
         : signature;
@@ -655,11 +666,13 @@ export class PaymentsService {
             Buffer.from(incoming, 'hex'),
             Buffer.from(h1, 'hex'),
           );
-        } catch {
+        } catch (e) {
+          this.logger.error(`[PIX WEBHOOK - ERRO DE VALIDAÇÃO HMAC RAW] ${e?.message || e}`);
           valid = false;
         }
-      } // 2) Se falhar, tenta com JSON.stringify (corpos reconstruídos pelo body-parser)
+      }
 
+      // 2) Se falhar, tenta com JSON.stringify (corpos reconstruídos pelo body-parser)
       if (!valid) {
         const bodyStr = JSON.stringify(webhookData ?? {});
         try {
@@ -671,16 +684,25 @@ export class PaymentsService {
             Buffer.from(incoming, 'hex'),
             Buffer.from(h2, 'hex'),
           );
-        } catch {
+        } catch (e) {
+          this.logger.error(`[PIX WEBHOOK - ERRO DE VALIDAÇÃO HMAC JSON] ${e?.message || e}`);
           valid = false;
         }
       }
 
       if (!valid) {
-        throw new ForbiddenException('Invalid webhook signature.');
+        // ADDED LOG: Falha de segurança antes de lançar exceção
+        this.logger.error(`[PIX WEBHOOK - FALHA DE SEGURANÇA] Assinatura Inválida para EventId: ${eventId}. Verifique o SECRET!`);
+        // FIM ADDED LOG
+        throw new ForbiddenException('Assinatura do webhook PIX inválida.');
       }
-    } // replay protection
 
+      // ADDED LOG: Sucesso na validação da assinatura
+      this.logger.log(`[PIX WEBHOOK - SUCESSO DE SEGURANÇA] Assinatura válida. Prosseguindo para buscar PaymentIntent.`);
+      // FIM ADDED LOG
+    } // Fim do bloco 'else' (onde o secret está configurado)
+
+    // replay protection
     const exists = await this.prisma.webhookReplay.findUnique({
       where: { eventId },
     });
