@@ -13,81 +13,95 @@ import * as process from 'process';
 import { I18nService } from './common/i18n/i18n.service';
 
 async function bootstrap() {
-  console.time('AppStartupTotal');
+  console.time('AppStartupTotal');
 
-  console.time('NestAppCreation');
-  const app = await NestFactory.create(AppModule);
-  console.timeEnd('NestAppCreation');
+  console.time('NestAppCreation');
+  const app = await NestFactory.create(AppModule);
+  console.timeEnd('NestAppCreation');
 
-  const configService = app.get(ConfigService);
-  const i18nService = app.get(I18nService);
+  const configService = app.get(ConfigService);
+  const i18nService = app.get(I18nService);
 
-  const sentryDsn = configService.get<string>('SENTRY_DSN');
-  const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
-  const isProd = nodeEnv === 'production';
+  const sentryDsn = configService.get<string>('SENTRY_DSN');
+  const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
+  const isProd = nodeEnv === 'production';
 
-  if (sentryDsn) {
-    Sentry.init({
-      dsn: sentryDsn,
-      environment: nodeEnv,
-      tracesSampleRate: 1.0,
-      profilesSampleRate: 1.0,
-      integrations: [nodeProfilingIntegration()],
+  if (sentryDsn) {
+    Sentry.init({
+      dsn: sentryDsn,
+      environment: nodeEnv,
+      tracesSampleRate: 1.0,
+      profilesSampleRate: 1.0,
+      integrations: [nodeProfilingIntegration()],
+    });
+    console.log('[Sentry] Inicializado com sucesso.');
+  } else {
+    console.warn(
+      '[Sentry] SENTRY_DSN não configurado. O monitoramento de erros e performance do Sentry está desativado.',
+    );
+  }
+
+
+app.use((req: any, res, next) => {
+
+  if (req.originalUrl.includes('/payments/webhook/pix')) {
+    const expectedEncoding = 'utf8';
+    req.setEncoding(expectedEncoding);
+    let data = '';
+    
+    // 1. Captura o corpo bruto (stream)
+    req.on('data', (chunk) => {
+      data += chunk;
     });
-    console.log('[Sentry] Inicializado com sucesso.');
-  } else {
-    console.warn(
-      '[Sentry] SENTRY_DSN não configurado. O monitoramento de erros e performance do Sentry está desativado.',
-    );
-  }
 
-  // 🚨 CORREÇÃO CRÍTICA: Middleware para capturar o rawBody APENAS na rota do webhook
-  // Isso evita conflitos globais de body-parser com o proxy do Railway/PagBank.
-  app.use((req: any, res, next) => {
-    // 🛑 Verifica o URL original para garantir que é o webhook do PIX
-    // É importante usar .includes() pois o Railway pode adicionar prefixos
-    if (req.originalUrl.includes('/payments/webhook/pix')) {
-      req.setEncoding('latin1');
-      let data = '';
-      req.on('data', (chunk) => {
-        data += chunk;
-      });
-      req.on('end', () => {
-        // Armazena o corpo bruto como um Buffer
-        req.rawBody = Buffer.from(data, 'latin1'); 
-        next(); // Passa para o próximo middleware
-      });
-    } else {
-      // Para todas as outras rotas, pulamos este middleware
-      next();
-    }
-  });
-
-  // Aplica o body-parser JSON e URL-ENCODED normais para as outras rotas
-  // Isso DEVE vir DEPOIS do middleware customizado acima.
-  app.use(json({ limit: '10mb' }));
-  app.use(urlencoded({ extended: true, limit: '10mb' }));
-
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'http://localhost:8081',
-    'https://limpeja-backend-production-edfa.up.railway.app',
-  ];
-
-  // CORS sem logs de origem para evitar flood em produção
-  app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
+    req.on('end', () => {
+      // 2. Armazena o corpo bruto (string) em 'rawBody'
+      req.rawBody = data; 
+      
+      // 3. Tenta parsear para JSON e armazena em 'req.body' (para o @Body() do controller)
+      try {
+        req.body = JSON.parse(data);
+        console.log('[Webhook PIX] Raw body lido e JSON parseado com sucesso.');
+      } catch (e) {
+        // Se a PagBank enviar algo que não seja JSON (ou se o parse falhar), 
+        // armazena a string bruta em req.body.
+        req.body = data;
+        console.error('[Webhook PIX] Falha ao parsear JSON do payload. Usando string bruta.', e);
       }
-    },
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    credentials: true,
-  });
+      next(); // Passa para o controller
+    });
+  } else {
+    // Para todas as outras rotas, pulamos este middleware
+    next();
+  }
+});
 
-  app.useGlobalPipes(
+
+  // Aplica o body-parser JSON e URL-ENCODED normais para as outras rotas
+  // Isso DEVE vir DEPOIS do middleware customizado acima.
+  app.use(json({ limit: '10mb' }));
+  app.use(urlencoded({ extended: true, limit: '10mb' }));
+
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:8081',
+    'https://limpeja-backend-production-edfa.up.railway.app',
+  ];
+
+  // CORS sem logs de origem para evitar flood em produção
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+  });
+
+   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
@@ -107,82 +121,82 @@ async function bootstrap() {
     }),
   );
 
-  // Usa o novo filtro de exceções globalmente
-  app.useGlobalFilters(new AllExceptionsFilter(i18nService));
+  // Usa o novo filtro de exceções globalmente
+  app.useGlobalFilters(new AllExceptionsFilter(i18nService));
 
-  try {
-    admin.initializeApp();
-    console.log(
-      '[Firebase Admin] SDK inicializado automaticamente no ambiente Cloud Run ou GCP.',
-    );
-  } catch (error: any) {
-    console.error(
-      `[Firebase Admin] Erro na inicialização automática do SDK: ${error.message}`,
-    );
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      try {
-        const serviceAccountPath = path.resolve(
-          process.cwd(),
-          process.env.GOOGLE_APPLICATION_CREDENTIALS,
-        );
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const serviceAccount = require(serviceAccountPath);
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-        });
-        console.log(
-          '[Firebase Admin] SDK inicializado via GOOGLE_APPLICATION_CREDENTIALS.',
-        );
-      } catch (innerError: any) {
-        console.error(
-          `[Firebase Admin] Erro ao carregar credenciais de GOOGLE_APPLICATION_CREDENTIALS: ${innerError.message}`,
-        );
-        throw new Error(
-          'Firebase Admin SDK failed to initialize via GOOGLE_APPLICATION_CREDENTIALS.',
-        );
-      }
-    } else {
-      console.warn(
-        '[Firebase Admin] Firebase Admin SDK não foi inicializado. Funções que dependem dele (como notificações push) podem falhar.',
-      );
-    }
-  }
+  try {
+    admin.initializeApp();
+    console.log(
+      '[Firebase Admin] SDK inicializado automaticamente no ambiente Cloud Run ou GCP.',
+    );
+  } catch (error: any) {
+    console.error(
+      `[Firebase Admin] Erro na inicialização automática do SDK: ${error.message}`,
+    );
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      try {
+        const serviceAccountPath = path.resolve(
+          process.cwd(),
+          process.env.GOOGLE_APPLICATION_CREDENTIALS,
+        );
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const serviceAccount = require(serviceAccountPath);
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+        console.log(
+          '[Firebase Admin] SDK inicializado via GOOGLE_APPLICATION_CREDENTIALS.',
+        );
+      } catch (innerError: any) {
+        console.error(
+          `[Firebase Admin] Erro ao carregar credenciais de GOOGLE_APPLICATION_CREDENTIALS: ${innerError.message}`,
+        );
+        throw new Error(
+          'Firebase Admin SDK failed to initialize via GOOGLE_APPLICATION_CREDENTIALS.',
+        );
+      }
+    } else {
+      console.warn(
+        '[Firebase Admin] Firebase Admin SDK não foi inicializado. Funções que dependem dele (como notificações push) podem falhar.',
+      );
+    }
+  }
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('LimpeJá API')
-    .setDescription('Documentação da API do marketplace de serviços LimpeJá')
-    .setVersion('1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        name: 'JWT',
-        description: 'Insira o token JWT',
-        in: 'header',
-      },
-      'access-token',
-    )
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api', app, document);
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('LimpeJá API')
+    .setDescription('Documentação da API do marketplace de serviços LimpeJá')
+    .setVersion('1.0')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'JWT',
+        description: 'Insira o token JWT',
+        in: 'header',
+      },
+      'access-token',
+    )
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api', app, document);
 
-  // Ajusta níveis de log do NestJS para produção vs desenvolvimento
-  if (isProd) {
-    app.useLogger(['error', 'warn', 'log']);
-  } else {
-    app.useLogger(['error', 'warn', 'log', 'debug', 'verbose']);
-  }
+  // Ajusta níveis de log do NestJS para produção vs desenvolvimento
+  if (isProd) {
+    app.useLogger(['error', 'warn', 'log']);
+  } else {
+    app.useLogger(['error', 'warn', 'log', 'debug', 'verbose']);
+  }
 
-  const port = configService.get<number>('PORT') || 3000;
+  const port = configService.get<number>('PORT') || 3000;
 
-  console.time('AppListening');
-  await app.listen(port, '0.0.0.0');
-  console.timeEnd('AppListening');
+  console.time('AppListening');
+  await app.listen(port, '0.0.0.0');
+  console.timeEnd('AppListening');
 
-  console.log(`Application is running on: ${await app.getUrl()}`);
-  console.log(`Swagger documentation available at: ${await app.getUrl()}/api`);
-  console.timeEnd('AppStartupTotal');
+  console.log(`Application is running on: ${await app.getUrl()}`);
+  console.log(`Swagger documentation available at: ${await app.getUrl()}/api`);
+  console.timeEnd('AppStartupTotal');
 }
 
 bootstrap();
