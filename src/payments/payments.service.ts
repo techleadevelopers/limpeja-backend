@@ -147,66 +147,77 @@ export class PaymentsService {
    * Processa o webhook de notificação de pagamento (compra do cliente) enviado pelo PSP.
    * Este método deve validar a assinatura (HMAC) e atualizar o status do PaymentIntent/Booking.
    */
-  async handlePaymentWebhook(
-    signature: string,
-    payload: any,
-  ): Promise<void | MessageResponseDto> {
-    this.logger.log(
-      `[PaymentsService] Webhook recebido. Evento: ${payload.event}`,
+async handlePaymentWebhook(
+  signature: string,
+  payload: any,
+): Promise<void | MessageResponseDto> {
+  this.logger.log(
+    `[PaymentsService] Webhook recebido. Evento: ${payload.event}`,
+  );
+
+  // 1. Validação da Assinatura (HMAC)
+  const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
+  if (!secret || !this.validateHmac(signature, payload)) {
+    this.logger.warn(
+      'Webhook com assinatura inválida recebido ou secret não configurado.',
     );
+    throw new ForbiddenException('Assinatura de Webhook Inválida.');
+  }
 
-    // 1. **Validação da Assinatura (HMAC):**
-    //    (É crucial implementar a lógica de validação de assinatura aqui para garantir que o webhook é legítimo)
-    // A validação HMAC foi removida do handlePixWebhook, mas é mantida aqui como um exemplo de boa prática.
-    const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
-    if (!secret || !this.validateHmac(signature, payload)) {
-      this.logger.warn(
-        'Webhook com assinatura inválida recebido ou secret não configurado.',
-      );
-      throw new ForbiddenException('Assinatura de Webhook Inválida.');
-    }
+  // 2. Processamento do Evento (CORRIGIDO)
+  const status = payload?.transaction?.status
+    ? String(payload.transaction.status).toUpperCase()
+    : '';
 
-    // 2. **Processamento do Evento:**
-    //    Se o evento for de pagamento confirmado, atualize o status.
-    if (payload.event === 'charge.paid' || payload.status === 'PAID') {
-      const externalRef = payload.data?.id || payload.resource_id; // Depende do PSP
-      const bookingId = payload.reference_id || externalRef; // Encontre a referência da sua cobrança
+  if (
+    payload.event === 'charge.paid' ||
+    status === 'PAID' ||
+    status === 'COMPLETED' ||
+    status === 'APPROVED'
+  ) {
+    const externalRef =
+      payload?.data?.id ||
+      payload?.resource_id ||
+      payload?.transaction?.id;
 
-      if (bookingId) {
-        // Encontre o PaymentIntent e Booking no seu banco de dados
-        const intent = await this.prisma.paymentIntent.findFirst({
-          where: { externalRef: externalRef },
-          include: { booking: true },
-        });
+    const bookingId =
+      payload?.reference_id ||
+      payload?.transaction?.reference_id ||
+      externalRef;
 
-        if (intent && intent.status !== PaymentIntentStatus.PAID) {
-          // Lógica para atualizar PaymentIntent e Booking para PAID
-          await this.prisma.$transaction(async (tx) => {
-            await tx.paymentIntent.update({
-              where: { id: intent.id },
-              data: { status: PaymentIntentStatus.PAID },
-            });
+    if (bookingId) {
+      const intent = await this.prisma.paymentIntent.findFirst({
+        where: { externalRef },
+        include: { booking: true },
+      });
 
-            await tx.booking.update({
-              where: { id: intent.bookingId },
-              data: { status: BookingStatus.CONFIRMED },
-            });
+      if (intent && intent.status !== PaymentIntentStatus.PAID) {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.paymentIntent.update({
+            where: { id: intent.id },
+            data: { status: PaymentIntentStatus.PAID },
           });
 
-          this.logger.log(
-            `[PaymentsService] Pagamento ${externalRef} para o agendamento ${intent.bookingId} CONFIRMADO.`,
-          );
-        } else if (!intent) {
-          this.logger.warn(
-            `[PaymentsService] Webhook para ref. ${externalRef} recebido, mas PaymentIntent não encontrado.`,
-          );
-        }
+          await tx.booking.update({
+            where: { id: intent.bookingId },
+            data: { status: BookingStatus.CONFIRMED },
+          });
+        });
+
+        this.logger.log(
+          `[PaymentsService] Pagamento ${externalRef} para o agendamento ${intent.bookingId} CONFIRMADO.`,
+        );
+      } else if (!intent) {
+        this.logger.warn(
+          `[PaymentsService] Webhook para ref ${externalRef} recebido, mas PaymentIntent não encontrado.`,
+        );
       }
     }
-
-    // O PSP espera um código 200 OK
-    return { message: 'Webhook processado com sucesso' };
   }
+
+  // 3. OK para o PSP
+  return { message: 'Webhook processado com sucesso' };
+}
 
   // Função de validação HMAC
   private validateHmac(signature: string, payload: any): boolean {
@@ -401,7 +412,9 @@ export class PaymentsService {
     }
 
     const transactionId = webhookData.transactionId as string;
-    const status = webhookData?.status ? String(webhookData.status) : '';
+    const status = webhookData?.transaction?.status
+  ? String(webhookData.transaction.status).toUpperCase()
+  : '';
     if (!transactionId || !status) {
       throw new BadRequestException(
         'Dados essenciais (transactionId, status) ausentes no webhook.',
