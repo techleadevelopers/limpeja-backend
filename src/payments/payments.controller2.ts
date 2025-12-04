@@ -155,37 +155,24 @@ export class PaymentsController {
   // ===========================================================================
   // Webhook PIX PagBank — RAW (URLENCODED)
   // ===========================================================================
-  @Post('webhook/pix')
-  @Header('Content-Type', 'application/json')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Webhook PIX PagBank usando RAW body.',
-  })
-  public async handlePixWebhook(
-    @Req() req: Request,
-    @Res() res: Response,
-  ) {
-    // >>> FIX: cast to any to avoid TS error about non-standard properties
-    const rawBody =
-      ((req as any).rawBody?.toString && (req as any).rawBody?.toString()) ??
-      ((req as any).bodyRaw?.toString && (req as any).bodyRaw?.toString()) ??
-      null;
+@Post('webhook/pix')
+@HttpCode(200)
+@ApiOperation({
+  summary: 'Webhook PIX PagBank usando RAW body.',
+})
+public async handlePixWebhook(@Req() req: Request) {
+  // Nest/Express pode expor rawBody assim quando habilitado:
+  const rawBody =
+    (req as any).rawBody ||
+    req.body ||
+    null;
 
-    const parsed =
-      typeof req.body === 'object' && req.body !== null
-        ? req.body
-        : rawBody
-        ? Object.fromEntries(new URLSearchParams(rawBody))
-        : {};
+  const parsed =
+    typeof req.body === 'object' ? req.body : null;
 
-    const result = await this.paymentsService.handlePixWebhook(
-      rawBody,
-      undefined,
-      parsed,
-    );
+  return await this.paymentsService.handlePixWebhook(rawBody, parsed);
+}
 
-    return res.status(200).json(result);
-  }
 
   // ===========================================================================
   // Webhook Withdrawal

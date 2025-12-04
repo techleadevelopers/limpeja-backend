@@ -241,34 +241,31 @@ async handlePaymentWebhook(
 
   // A função handlePixWebhook corrigida e com a tipagem `BookingWithUsers`
 async handlePixWebhook(
-  rawPayload: string | Buffer | null,
-  _unusedEventId: string | undefined,
-  webhookData: any,
+  rawBody: any,
+  parsedBody: any,
 ) {
   try {
-    // 1. Unificar dados do webhook (prioridade: parsed → JSON → vazio)
     let data: any = null;
 
-    // Caso venha parsed do URLSearchParams (form-urlencoded)
-    if (webhookData && typeof webhookData === "object") {
-      data = webhookData;
+    // 1. PRIORIDADE PARA O PARSED (se veio form-urlencoded)
+    if (parsedBody && typeof parsedBody === 'object') {
+      data = parsedBody;
     }
 
-    // Caso o PagBank envie RAW JSON
-    if (!data && rawPayload) {
+    // 2. SE NÃO TEVE PARSED → tenta JSON puro
+    if (!data && rawBody) {
       try {
-        data = JSON.parse(rawPayload.toString());
+        data = JSON.parse(rawBody.toString());
+        console.log("[Webhook PIX] JSON parseado com sucesso");
       } catch {
-        // Não é JSON → fica como string mesmo
-        data = { raw: rawPayload.toString() };
+        console.warn("[Webhook PIX] JSON inválido → usando string bruta");
+        data = { raw: rawBody.toString() };
       }
     }
 
-    if (!data) {
-      return { success: false, message: "Webhook vazio" };
-    }
+    if (!data) return { success: false, message: "Webhook vazio" };
 
-    // 2. Detectar chargeId em múltiplos formatos
+    // 3. DETECTA O CHARGEID EM QUALQUER FORMATO
     const chargeId =
       data?.charge?.id ||
       data?.chargeId ||
@@ -280,43 +277,38 @@ async handlePixWebhook(
       data?.resource_id ||
       null;
 
-    const status = data?.status ?? null;
+    const status = data?.status || null;
 
-    if (!chargeId) {
-      return { success: false, message: "chargeId ausente" };
-    }
+    if (!chargeId) return { success: false, message: "chargeId ausente" };
 
-    // 3. Buscar PaymentIntent no banco
+    // 4. BUSCA O PAYMENTINTENT
     const intent = await this.prisma.paymentIntent.findFirst({
       where: { externalRef: String(chargeId) },
     });
 
     if (!intent) {
-      this.logger.warn(
-        `Nenhum PaymentIntent encontrado para chargeId ${chargeId}`,
-      );
-      return { success: true, message: "chargeId não associado a nenhum booking" };
+      console.warn(`Nenhum PaymentIntent encontrado para chargeId ${chargeId}`);
+      return {
+        success: true,
+        message: "chargeId não associado a nenhum booking",
+      };
     }
 
-    // 4. Atualizar o Booking
+    // 5. CONFIRMA O BOOKING
     await this.prisma.booking.update({
       where: { id: intent.bookingId },
-      data: {
-        status: "CONFIRMED",
-        updatedAt: new Date(),
-      },
+      data: { status: "CONFIRMED" },
     });
 
-    // 5. Retorno
     return {
       success: true,
-      message: "Webhook processado sem segurança",
+      message: "Webhook processado",
       chargeId,
       status,
     };
 
   } catch (err) {
-    this.logger.error("Erro no webhook PIX:", err);
+    console.error("Erro no webhook PIX:", err);
     return { success: false, message: "Erro interno no webhook" };
   }
 }
