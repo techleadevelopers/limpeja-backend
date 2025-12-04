@@ -249,6 +249,7 @@ async handlePixWebhook(rawBody: any, parsedBody: any) {
     if (parsedBody && typeof parsedBody === 'object') {
       data = parsedBody;
     }
+    
     // 2. SE NÃO VEIO PARSED → tenta JSON puro
     if (!data && rawBody) {
       try {
