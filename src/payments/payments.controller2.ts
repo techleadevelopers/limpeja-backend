@@ -31,9 +31,6 @@ import { Request } from 'express';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { UserRole } from '@prisma/client';
 
-/**
- * Interface para o payload do usuário autenticado vindo do JWT.
- */
 interface RequestUserPayload {
   userId: string;
   email: string;
@@ -42,18 +39,12 @@ interface RequestUserPayload {
   providerId?: string;
 }
 
-// -----------------------------------------------------------------------------
-
 @ApiTags('payments')
 @Controller('payments')
 export class PaymentsController {
   private readonly logger = new Logger(PaymentsController.name);
 
   constructor(private readonly paymentsService: PaymentsService) {}
-
-  // ---------------------------------------------------------------------------
-  // COBRANÇAS
-  // ---------------------------------------------------------------------------
 
   @Post('pix-charge')
   @UseGuards(JwtAuthGuard)
@@ -95,8 +86,6 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
-
   @Get('intent/:bookingId')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -124,10 +113,6 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // SAQUES
-  // ---------------------------------------------------------------------------
-
   @Post('withdrawal')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -153,7 +138,9 @@ export class PaymentsController {
       `[PaymentsController] requestWithdrawal: providerId=${providerId}`,
     );
     this.logger.debug(
-      `[PaymentsController] requestWithdrawal: req.user=${JSON.stringify(requestUser)}`,
+      `[PaymentsController] requestWithdrawal: req.user=${JSON.stringify(
+        requestUser,
+      )}`,
     );
 
     if (!providerId) {
@@ -173,10 +160,6 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // WEBHOOKS - PAGAMENTO
-  // ---------------------------------------------------------------------------
-
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -191,7 +174,7 @@ export class PaymentsController {
   }
 
   // ---------------------------------------------------------------------------
-  // WEBHOOK PIX — SEM SEGURANÇA
+  // **WEBHOOK PIX SEM SEGURANÇA — APENAS JSON**
   // ---------------------------------------------------------------------------
 
   @Post('webhook/pix')
@@ -205,37 +188,24 @@ export class PaymentsController {
     description: 'Webhook recebido e processado.',
   })
   async handlePixWebhook(
-    @Body() webhookData: any,
     @Req() req: Request,
+    @Body() webhookData: any,
   ): Promise<MessageResponseDto> {
-    this.logger.log(
-      `[WEBHOOK PIX - PORTA DE ENTRADA] Tentativa de acesso. ID do Evento Ignorado.`,
+    this.logger.log('[WEBHOOK PIX] Recebido sem validação de segurança.');
+
+    const rawBody =
+      (req as any).rawBody ||
+      (req as any).bodyRaw ||
+      JSON.stringify(webhookData) ||
+      null;
+
+    return this.paymentsService.handlePixWebhook(
+      rawBody,          // 1) rawPayload
+      undefined,        // 2) _unusedEventId
+      webhookData       // 3) webhookData
     );
-
-    try {
-      const rawBody = (req as any).rawBody;
-
-      return await this.paymentsService.handlePixWebhook(
-        rawBody ?? null,
-        undefined,
-        webhookData ?? null,
-      );
-    } catch (error: any) {
-      this.logger.error(
-        'Erro ao processar webhook PIX no controller:',
-        error?.message,
-        error?.stack,
-      );
-
-      return {
-        message:
-          'Erro interno ao processar webhook PIX, mas o erro foi logado.',
-      };
-    }
   }
 
-  // ---------------------------------------------------------------------------
-  // WEBHOOK WITHDRAWAL
   // ---------------------------------------------------------------------------
 
   @Post('webhook/withdrawal')
@@ -262,10 +232,6 @@ export class PaymentsController {
       payload,
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // ADMIN
-  // ---------------------------------------------------------------------------
 
   @Get('transactions')
   @UseGuards(JwtAuthGuard)
@@ -353,10 +319,6 @@ export class PaymentsController {
 
     return this.paymentsService.rejectWithdrawal(id, body?.reason);
   }
-
-  // ---------------------------------------------------------------------------
-  // TESTE - ORDERS
-  // ---------------------------------------------------------------------------
 
   @Post('test-orders')
   @HttpCode(HttpStatus.OK)
