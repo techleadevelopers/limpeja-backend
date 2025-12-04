@@ -281,7 +281,8 @@ export class PaymentsService {
     const orderId = webhookData?.id as string | undefined;
     const qr = webhookData?.qr_codes?.[0];
     if (orderId && qr) {
-      const qrStatus = (qr.status ?? '').toString().toUpperCase();
+      const qrStatus = qr?.status ? String(qr.status).toUpperCase() : '';
+
       let intentNewStatus: PaymentIntentStatus | undefined =
         PaymentIntentStatus.PENDING;
       let bookingNewStatus: BookingStatus | undefined;
@@ -400,7 +401,7 @@ export class PaymentsService {
     }
 
     const transactionId = webhookData.transactionId as string;
-    const status = webhookData.status?.toString() || '';
+    const status = webhookData?.status ? String(webhookData.status) : '';
     if (!transactionId || !status) {
       throw new BadRequestException(
         'Dados essenciais (transactionId, status) ausentes no webhook.',

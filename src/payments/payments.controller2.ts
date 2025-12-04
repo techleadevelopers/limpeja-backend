@@ -216,10 +216,10 @@ export class PaymentsController {
       const rawBody = (req as any).rawBody;
 
       // Chamando o service, passando o rawBody para que ele possa processar o dado bruto se necessário.
-      return await this.paymentsService.handlePixWebhook(
-  rawBody, // agora é o primeiro argumento correto
-  undefined, // eventId opcional
-  webhookData // metadata
+return await this.paymentsService.handlePixWebhook(
+  rawBody ?? null,      // sempre alguma coisa válida
+  undefined,            // eventId desativado
+  webhookData ?? null   // metadata seguro
 );
 
     } catch (error: any) {
