@@ -240,10 +240,8 @@ async handlePaymentWebhook(
   }
 
   // A função handlePixWebhook corrigida e com a tipagem `BookingWithUsers`
-async handlePixWebhook(
-  rawBody: any,
-  parsedBody: any,
-) {
+// A função handlePixWebhook corrigida e funcional
+async handlePixWebhook(rawBody: any, parsedBody: any) {
   try {
     let data: any = null;
 
@@ -268,34 +266,38 @@ async handlePixWebhook(
     console.log(">>> WEBHOOK PARSED:", data);
 
     // ---------------------------------------------------------
-    // 🔥🔥🔥 AQUI ESTÁ O BLOCO DO "PAID" QUE VOCÊ PEDIU 🔥🔥🔥
+    // EXTRAI O reference_id REAL do PagBank
     // ---------------------------------------------------------
 
-    const qr =
-      data?.qr_codes?.[0] ||
-      data?.charges?.[0]?.payment_method?.qr_code;
+    const referenceId =
+      data?.reference_id ||
+      data?.transaction?.reference_id ||
+      data?.charges?.[0]?.reference_id ||
+      null;
 
-    if (qr?.status === 'PAID') {
-      console.log('⚡ PAGAMENTO PIX CONFIRMADO (PAID) ⚡');
+    // ---------------------------------------------------------
+    // AQUI ESTÁ A LÓGICA DO "PAID" CORRIGIDA
+    // ---------------------------------------------------------
 
-      const referenceId =
-        qr.reference_id ||
-        data.reference_id ||
-        data?.charges?.[0]?.reference_id;
+    const chargeStatus =
+      data?.charges?.[0]?.status?.toUpperCase() ||
+      data?.status?.toUpperCase() ||
+      null;
 
-      console.log('REFERENCE_ID:', referenceId);
+    if (chargeStatus === "PAID" || chargeStatus === "APPROVED" || chargeStatus === "COMPLETED") {
+      console.log("⚡ PAGAMENTO PIX CONFIRMADO ⚡");
+      console.log("REFERENCE_ID:", referenceId);
 
-      // chama sua função de confirmar pagamento
       await this.confirmPixPayment(referenceId);
 
       return { ok: true };
     }
 
     // ---------------------------------------------------------
-    // 🔥 FIM DO BLOCO QUE VOCÊ MANDOU 🔥
+    // FIM DO BLOCO CORRIGIDO
     // ---------------------------------------------------------
 
-    // 3. DETECTA CHARGE ID
+    // 3. Detecta chargeId para fallback
     const chargeId =
       data?.charge?.id ||
       data?.chargeId ||
@@ -342,6 +344,7 @@ async handlePixWebhook(
     return { success: false, message: "Erro interno no webhook" };
   }
 }
+
 async confirmPixPayment(referenceId: string) {
   console.log(">>> CONFIRMANDO PIX PARA REFERENCE:", referenceId);
 
