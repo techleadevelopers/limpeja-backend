@@ -12,6 +12,8 @@ import {
   Logger,
   InternalServerErrorException,
   Headers,
+  Res,
+  Header,
 } from '@nestjs/common';
 
 import {
@@ -31,7 +33,7 @@ import {
 import { PaymentIntentResponseDto } from './dto/payment-intent-response.dto';
 import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { UserRole } from '@prisma/client';
 
@@ -50,10 +52,9 @@ export class PaymentsController {
 
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Create PIX Charge
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
   @Post('pix-charge')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -82,10 +83,9 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Get PaymentIntent
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
   @Get('intent/:bookingId')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -106,10 +106,9 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Withdrawal
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
   @Post('withdrawal')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -140,10 +139,9 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Webhook pagamentos
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Webhook de pagamentos (orders/charges).' })
@@ -154,44 +152,44 @@ export class PaymentsController {
     return this.paymentsService.handlePaymentWebhook(signature, payload);
   }
 
-  // ---------------------------------------------------------------------------
-  // Webhook PIX PagBank — URLENCODED — SEM SEGURANÇA
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
+  // Webhook PIX PagBank — RAW (URLENCODED)
+  // ===========================================================================
   @Post('webhook/pix')
+  @Header('Content-Type', 'application/json')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Webhook PIX PagBank (URLENCODED, SEM SEGURANÇA).',
+    summary: 'Webhook PIX PagBank usando RAW body.',
   })
-  async handlePixWebhook(
+  public async handlePixWebhook(
     @Req() req: Request,
-    @Body() webhookData: any,
-  ): Promise<MessageResponseDto> {
-    let rawBody: string | null =
-      (req as any).rawBody?.toString() ??
-      (req as any).bodyRaw?.toString() ??
+    @Res() res: Response,
+  ) {
+    // >>> FIX: cast to any to avoid TS error about non-standard properties
+    const rawBody =
+      ((req as any).rawBody?.toString && (req as any).rawBody?.toString()) ??
+      ((req as any).bodyRaw?.toString && (req as any).bodyRaw?.toString()) ??
       null;
 
-    if (!rawBody) {
-      rawBody =
-        typeof webhookData === 'string'
-          ? webhookData
-          : JSON.stringify(webhookData);
-    }
+    const parsed =
+      typeof req.body === 'object' && req.body !== null
+        ? req.body
+        : rawBody
+        ? Object.fromEntries(new URLSearchParams(rawBody))
+        : {};
 
-    const parsed = Object.fromEntries(new URLSearchParams(rawBody));
-
-    return this.paymentsService.handlePixWebhook(
+    const result = await this.paymentsService.handlePixWebhook(
       rawBody,
       undefined,
       parsed,
     );
+
+    return res.status(200).json(result);
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Webhook Withdrawal
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
   @Post('webhook/withdrawal')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -209,10 +207,9 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Admin — Listar transações
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
   @Get('transactions')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -226,10 +223,9 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Admin — Refund
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
   @Post(':transactionId/refund')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -247,10 +243,9 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Admin — List Withdrawals
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
   @Get('withdrawals')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -261,10 +256,9 @@ export class PaymentsController {
     return this.paymentsService.listWithdrawals(req.query?.status);
   }
 
-  // ---------------------------------------------------------------------------
-  // Admin — Register webhooks PagBank
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
+  // Admin — Register Webhooks PagBank
+  // ===========================================================================
   @Post('webhooks/register')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -281,10 +275,9 @@ export class PaymentsController {
     );
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Admin — Aprovar/Rejeitar Saque
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
   @Patch('withdrawals/:id/approve')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -309,10 +302,9 @@ export class PaymentsController {
     return this.paymentsService.rejectWithdrawal(id, body?.reason);
   }
 
-  // ---------------------------------------------------------------------------
-  // Teste orders PagBank
-  // ---------------------------------------------------------------------------
-
+  // ===========================================================================
+  // Test Orders
+  // ===========================================================================
   @Post('test-orders')
   @HttpCode(HttpStatus.OK)
   async testOrdersDirect() {
