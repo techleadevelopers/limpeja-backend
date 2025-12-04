@@ -177,6 +177,7 @@ try {
   // 1 → tenta JSON normalmente
   parsed = JSON.parse(text);
   console.log('[Webhook PIX] JSON parseado com sucesso');
+  console.log('>>> WEBHOOK PARSED:', parsed);
 } catch {
   console.log('[Webhook PIX] JSON inválido → usando string bruta');
 
