@@ -13,17 +13,21 @@ import {
   InternalServerErrorException,
   Headers,
 } from '@nestjs/common';
+
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+
 import { PaymentsService } from './payments.service';
+
 import {
   CreatePixChargeDto,
   PixChargeResponseDto,
 } from './dto/create-pix-charge.dto';
+
 import { PaymentIntentResponseDto } from './dto/payment-intent-response.dto';
 import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -45,6 +49,10 @@ export class PaymentsController {
   private readonly logger = new Logger(PaymentsController.name);
 
   constructor(private readonly paymentsService: PaymentsService) {}
+
+  // ---------------------------------------------------------------------------
+  // Create PIX Charge
+  // ---------------------------------------------------------------------------
 
   @Post('pix-charge')
   @UseGuards(JwtAuthGuard)
@@ -68,7 +76,9 @@ export class PaymentsController {
     const clientUserId = requestUser.userId;
 
     this.logger.log(
-      `[PaymentsController] createPixCharge: userId=${clientUserId} dto=${JSON.stringify(createPixChargeDto)}`,
+      `[PaymentsController] createPixCharge: userId=${clientUserId} dto=${JSON.stringify(
+        createPixChargeDto,
+      )}`,
     );
 
     if (!clientUserId) {
@@ -85,6 +95,10 @@ export class PaymentsController {
       createPixChargeDto,
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Get PaymentIntent
+  // ---------------------------------------------------------------------------
 
   @Get('intent/:bookingId')
   @UseGuards(JwtAuthGuard)
@@ -113,13 +127,16 @@ export class PaymentsController {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Withdrawal
+  // ---------------------------------------------------------------------------
+
   @Post('withdrawal')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
   @ApiOperation({
-    summary:
-      'Solicita um saque de valores disponíveis para um provedor via chave PIX.',
+    summary: 'Solicita um saque do provedor via chave PIX.',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -137,16 +154,10 @@ export class PaymentsController {
     this.logger.log(
       `[PaymentsController] requestWithdrawal: providerId=${providerId}`,
     );
-    this.logger.debug(
-      `[PaymentsController] requestWithdrawal: req.user=${JSON.stringify(
-        requestUser,
-      )}`,
-    );
 
     if (!providerId) {
       this.logger.error(
         '[PaymentsController] requestWithdrawal: providerId não encontrado no token.',
-        requestUser as any,
       );
       throw new InternalServerErrorException(
         'ID do provedor não disponível no token de autenticação.',
@@ -160,10 +171,14 @@ export class PaymentsController {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Webhooks genéricos
+  // ---------------------------------------------------------------------------
+
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Recebe notificações de PAGAMENTO (Compra) do PSP (Webhook)',
+    summary: 'Recebe notificações de pagamento (compra)',
   })
   async handlePaymentWebhook(
     @Headers('x-signature') signature: string,
@@ -174,35 +189,49 @@ export class PaymentsController {
   }
 
   // ---------------------------------------------------------------------------
-  // **WEBHOOK PIX SEM SEGURANÇA — APENAS JSON**
+  // 🚨 WEBHOOK PIX — FORM-URLENCODED — SEM SEGURANÇA
   // ---------------------------------------------------------------------------
 
   @Post('webhook/pix')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Recebe notificações de webhook de pagamento PIX. (SEM SEGURANÇA)',
-    description: 'Chamado pelo PSP para notificar status de uma transação PIX.',
+    summary: 'Recebe notificações de PIX do PagBank (SEM SEGURANÇA).',
   })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'Webhook recebido e processado.',
+    description: 'Webhook PIX recebido e processado.',
   })
   async handlePixWebhook(
     @Req() req: Request,
     @Body() webhookData: any,
   ): Promise<MessageResponseDto> {
-    this.logger.log('[WEBHOOK PIX] Recebido sem validação de segurança.');
+    this.logger.log('[WEBHOOK PIX] Recebido (PagBank — URLENCODED).');
 
-    const rawBody =
-      (req as any).rawBody ||
-      (req as any).bodyRaw ||
-      JSON.stringify(webhookData) ||
+    let rawBody: string | null =
+      (req as any).rawBody?.toString() ??
+      (req as any).bodyRaw?.toString() ??
       null;
 
+    if (!rawBody) {
+      this.logger.warn('[Webhook PIX] rawBody estava vazio, usando fallback.');
+      rawBody = typeof webhookData === 'string'
+        ? webhookData
+        : JSON.stringify(webhookData);
+    }
+
+    this.logger.debug(`[Webhook PIX] RAW BODY = ${rawBody}`);
+
+    // 🔥 Converter corretamente URLENCODED → Objeto
+    const parsed = Object.fromEntries(new URLSearchParams(rawBody));
+
+    this.logger.debug(
+      `[Webhook PIX] PARSED BODY = ${JSON.stringify(parsed)}`,
+    );
+
     return this.paymentsService.handlePixWebhook(
-      rawBody,          // 1) rawPayload
-      undefined,        // 2) _unusedEventId
-      webhookData       // 3) webhookData
+      rawBody,       // 1
+      undefined,     // 2
+      parsed,        // 3
     );
   }
 
@@ -213,17 +242,13 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Recebe notificações de webhook de saque.',
   })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Webhook de saque recebido e processado.',
-  })
   async handleWithdrawalWebhook(
     @Headers('x-signature') signature: string,
     @Headers('x-event-id') eventId: string,
     @Body() payload: any,
   ) {
     this.logger.log(
-      '[PaymentsController] handleWithdrawalWebhook: received event from PSP.',
+      '[PaymentsController] handleWithdrawalWebhook: received event.',
     );
 
     return this.paymentsService.handleWithdrawalWebhook(
@@ -233,10 +258,13 @@ export class PaymentsController {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Admin endpoints
+  // ---------------------------------------------------------------------------
+
   @Get('transactions')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Lista transações (admin)' })
   async listTransactions(@Req() req: any) {
     if (req.user?.role !== 'ADMIN')
       throw new InternalServerErrorException('Admin only');
@@ -250,7 +278,6 @@ export class PaymentsController {
   @Post(':transactionId/refund')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Inicia reembolso (admin)' })
   async refund(
     @Req() req: any,
     @Param('transactionId') transactionId: string,
@@ -265,22 +292,16 @@ export class PaymentsController {
   @Get('withdrawals')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Lista solicitações de saque (admin)' })
   async listWithdrawals(@Req() req: any) {
     if (req.user?.role !== 'ADMIN')
       throw new InternalServerErrorException('Admin only');
 
-    const status = req.query?.status as string | undefined;
-
-    return this.paymentsService.listWithdrawals(status);
+    return this.paymentsService.listWithdrawals(req.query?.status);
   }
 
   @Post('webhooks/register')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({
-    summary: 'Registra webhooks de PIX e Payouts no PagBank (admin)',
-  })
   async registerWebhooks(
     @Req() req: any,
     @Body() body: { pixUrl?: string; payoutsUrl?: string },
@@ -297,7 +318,6 @@ export class PaymentsController {
   @Patch('withdrawals/:id/approve')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Aprova solicitação de saque (admin)' })
   async approveWithdrawal(@Req() req: any, @Param('id') id: string) {
     if (req.user?.role !== 'ADMIN')
       throw new InternalServerErrorException('Admin only');
@@ -308,7 +328,6 @@ export class PaymentsController {
   @Patch('withdrawals/:id/reject')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Rejeita solicitação de saque (admin)' })
   async rejectWithdrawal(
     @Req() req: any,
     @Param('id') id: string,
