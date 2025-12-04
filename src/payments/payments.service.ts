@@ -16,7 +16,6 @@ import {
   TransactionType,
   UserRole,
   LedgerEntryType,
-  SubscriptionFrequency, // NOVO: Adicionado para tipar o setupRecurringPayment
 } from '@prisma/client';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -29,14 +28,16 @@ import { QueuesService } from '../queues/queues.service';
 import {
   CreatePixChargeDto,
   PixChargeResponseDto,
-} from './dto/create-pix-charge.dto';
+}
+from './dto/create-pix-charge.dto';
 import { PaymentIntentResponseDto } from './dto/payment-intent-response.dto';
 import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
 import { CouponsService } from '../coupons/coupons.service';
 import { PayoutsService } from '../payouts/payouts.service';
 import { ConnectService } from '../connect/connect.service';
 
-// 1. Definição do Tipo (Recomendado para corrigir o Erro 2339 e garantir tipagem)
+// 1. Definição do Tipo (Recomendado para corrigir o Erro 2339)
+// Este tipo é usado para garantir a tipagem correta ao incluir relações aninhadas do Prisma.
 type BookingWithUsers = Prisma.BookingGetPayload<{
   include: {
     provider: { include: { user: true } };
@@ -44,20 +45,8 @@ type BookingWithUsers = Prisma.BookingGetPayload<{
   };
 }>;
 
-// NOVO: Tipo para o modelo PaymentIntent (para corrigir mapPaymentIntent)
-type PaymentIntentModel = Prisma.PaymentIntentGetPayload<{}>;
-
 @Injectable()
 export class PaymentsService {
-  requestWithdrawal(providerId: string, requestWithdrawalDto: RequestWithdrawalDto, idempotencyKey: string) {
-    throw new Error('Method not implemented.');
-  }
-  getPaymentIntentForBooking(bookingId: string, userId: string): PaymentIntentResponseDto | PromiseLike<PaymentIntentResponseDto> {
-    throw new Error('Method not implemented.');
-  }
-  handleWithdrawalWebhook(signature: string, eventId: string, payload: any) {
-    throw new Error('Method not implemented.');
-  }
   private readonly logger = new Logger(PaymentsService.name);
   private pagseguroApiToken: string | undefined;
   private pagseguroApiBaseUrl: string;
@@ -110,7 +99,7 @@ export class PaymentsService {
           'PaymentsService: mTLS habilitado para cliente HTTP do PagSeguro.',
         );
       }
-    } catch (err: any) {
+    } catch (err) {
       this.logger.warn(
         `PaymentsService: falha ao iniciar mTLS agent: ${err?.message}`,
       );
@@ -128,95 +117,24 @@ export class PaymentsService {
     }
   }
 
-  // =========================================================
-  // === MÉTODOS DE PAGAMENTO RECORRENTE (SUBSCRIPTION) - NOVOS STUBS ===
-  // =========================================================
-
-  /**
-   * Configura o método de pagamento inicial para uma nova assinatura.
-   * (E.g., Tokenização do cartão, criação de Recorrência no PSP).
-   */
-  async setupRecurringPayment(
-    clientId: string,
-    subscriptionId: string,
-    amount: number,
-    frequency: SubscriptionFrequency,
-  ): Promise<void> {
-    this.logger.log(
-      `[Recurring Payment] Setup para Subscription ${subscriptionId}`,
-    );
-    // 💡 TODO: Implementar a lógica real:
-    // 1. Tokenizar cartão do cliente.
-    // 2. Criar um plano de assinatura recorrente no PSP usando o token.
-  }
-
-  /**
-   * Processa uma cobrança específica para um agendamento gerado por assinatura.
-   * Esta é a chamada que estava faltando e causava o erro de compilação.
-   */
-  async processRecurringPayment(
-    clientId: string,
-    subscriptionId: string,
-    bookingId: string,
-    amount: number,
-  ): Promise<void> {
-    this.logger.log(
-      `[Recurring Payment] Processando cobrança para booking ${bookingId} (Subscription: ${subscriptionId}) no valor de R$ ${amount}.`,
-    );
-    // 💡 TODO: Implementar a lógica real:
-    // 1. Usar o token/ID de recorrência salvo em setupRecurringPayment.
-    // 2. Chamar o PSP para criar uma cobrança imediata (charge) referenciando a bookingId.
-  }
-
-  /**
-   * Notifica o PSP para pausar cobranças futuras da assinatura.
-   */
-  async pauseRecurringPayment(subscriptionId: string): Promise<void> {
-    this.logger.log(
-      `[Recurring Payment] Pausando cobranças para Subscription ${subscriptionId}`,
-    );
-    // 💡 TODO: Chamar o PSP para suspender ou cancelar a recorrência agendada.
-  }
-
-  /**
-   * Notifica o PSP para retomar cobranças futuras da assinatura.
-   */
-  async resumeRecurringPayment(subscriptionId: string): Promise<void> {
-    this.logger.log(
-      `[Recurring Payment] Retomando cobranças para Subscription ${subscriptionId}`,
-    );
-    // 💡 TODO: Chamar o PSP para reativar a recorrência.
-  }
-
-  // =========================================================
-  // === MÉTODOS EXISTENTES ===
-  // =========================================================
-
   /**
    * Processa o webhook de notificação de pagamento (compra do cliente) enviado pelo PSP.
    * Este método deve validar a assinatura (HMAC) e atualizar o status do PaymentIntent/Booking.
    */
-  async handlePaymentWebhook(
-    signature: string,
-    payload: any,
-  ): Promise<void | MessageResponseDto> {
-    this.logger.log(
-      `[PaymentsService] Webhook recebido. Evento: ${payload.event}`,
-    );
+  async handlePaymentWebhook(signature: string, payload: any): Promise<void | MessageResponseDto> {
+    this.logger.log(`[PaymentsService] Webhook recebido. Evento: ${payload.event}`);
 
     // 1. **Validação da Assinatura (HMAC):**
-    // (É crucial implementar a lógica de validação de assinatura aqui para garantir que o webhook é legítimo)
+    //    (É crucial implementar a lógica de validação de assinatura aqui para garantir que o webhook é legítimo)
     // A validação HMAC foi removida do handlePixWebhook, mas é mantida aqui como um exemplo de boa prática.
     const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
     if (!secret || !this.validateHmac(signature, payload)) {
-      this.logger.warn(
-        'Webhook com assinatura inválida recebido ou secret não configurado.',
-      );
+      this.logger.warn('Webhook com assinatura inválida recebido ou secret não configurado.');
       throw new ForbiddenException('Assinatura de Webhook Inválida.');
     }
 
     // 2. **Processamento do Evento:**
-    // Se o evento for de pagamento confirmado, atualize o status.
+    //    Se o evento for de pagamento confirmado, atualize o status.
     if (payload.event === 'charge.paid' || payload.status === 'PAID') {
       const externalRef = payload.data?.id || payload.resource_id; // Depende do PSP
       const bookingId = payload.reference_id || externalRef; // Encontre a referência da sua cobrança
@@ -242,13 +160,9 @@ export class PaymentsService {
             });
           });
 
-          this.logger.log(
-            `[PaymentsService] Pagamento ${externalRef} para o agendamento ${intent.bookingId} CONFIRMADO.`,
-          );
+          this.logger.log(`[PaymentsService] Pagamento ${externalRef} para o agendamento ${intent.bookingId} CONFIRMADO.`);
         } else if (!intent) {
-          this.logger.warn(
-            `[PaymentsService] Webhook para ref. ${externalRef} recebido, mas PaymentIntent não encontrado.`,
-          );
+          this.logger.warn(`[PaymentsService] Webhook para ref. ${externalRef} recebido, mas PaymentIntent não encontrado.`);
         }
       }
     }
@@ -261,9 +175,7 @@ export class PaymentsService {
   private validateHmac(signature: string, payload: any): boolean {
     const secret = this.configService.get<string>('PIX_WEBHOOK_SECRET');
     if (!secret) {
-      this.logger.error(
-        'PIX_WEBHOOK_SECRET não configurado. Validação HMAC desativada.',
-      );
+      this.logger.error('PIX_WEBHOOK_SECRET não configurado. Validação HMAC desativada.');
       return false; // Não pode validar sem o segredo
     }
     const computedSignature = createHmac('sha256', secret)
@@ -271,25 +183,33 @@ export class PaymentsService {
       .digest('hex');
 
     // Usar timingSafeEqual para prevenir ataques de temporização
-    return timingSafeEqual(
-      Buffer.from(signature, 'hex'),
-      Buffer.from(computedSignature, 'hex'),
-    );
+    return timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(computedSignature, 'hex'));
   }
 
-  // A função handlePixWebhook (deixada como estava, sem a correção de parsing do turno anterior,
-  // mas ciente que precisa de correção de parsing no Controller/Service para o erro "notificatio"!)
+  // A função handlePixWebhook corrigida e com a tipagem `BookingWithUsers`
   async handlePixWebhook(
-    signature: string | undefined, // Ignorado
-    eventId: string | undefined, // <--- eventId AGORA É IGNORADO E NÃO USADO
+    signature: string, // Agora ignorado
+    eventId: string,
     webhookData: any,
-    rawBody?: Buffer, // Ignorado
+    rawBody?: Buffer, // Agora ignorado
   ): Promise<MessageResponseDto> {
-    this.logger.log(
-      `[PIX WEBHOOK - DADOS DE ENTRADA] EventId (IGNORADO): ${eventId}`,
-    );
+    // REMOVIDA A LÓGICA DE NODE_ENV, SECRET, SIGNATURE E VALIDAÇÃO HMAC.
+    this.logger.log(`[PIX WEBHOOK - DADOS DE ENTRADA] EventId: ${eventId}`);
 
-    // ... (restante da lógica handlePixWebhook inalterada)
+    // ❌ REMOVIDA TODA A LÓGICA DE VALIDAÇÃO DE SEGURANÇA (HEADERS, HMAC).
+
+    // ✅ SEGURANÇA MÍNIMA MANTIDA: Proteção contra Replay Attack
+    const exists = await this.prisma.webhookReplay.findFirst({
+      where: { eventId },
+    });
+    if (!exists) {
+      await this.prisma.webhookReplay.create({
+        data: { source: 'pix', eventId },
+      });
+    } else {
+      this.logger.debug(`PIX webhook replay ${eventId} ignored.`);
+      return { message: 'ok' };
+    }
 
     // === PagBank Orders (qr_codes) ===
     const orderId = webhookData?.id as string | undefined;
@@ -337,11 +257,7 @@ export class PaymentsService {
 
       // Validar valor pago (quando presente)
       const qrAmountValue = qr?.amount?.value as number | undefined;
-      if (
-        qrAmountValue &&
-        intent.amountCents &&
-        qrAmountValue !== intent.amountCents
-      ) {
+      if (qrAmountValue && intent.amountCents && qrAmountValue !== intent.amountCents) {
         this.logger.warn(
           `[PaymentsService] handlePixWebhook amount mismatch order=${orderId} expected=${intent.amountCents} got=${qrAmountValue}`,
         );
@@ -361,12 +277,9 @@ export class PaymentsService {
         }));
       const finalized =
         booking &&
-        [
-          BookingStatus.COMPLETED,
-          BookingStatus.CANCELED,
-          BookingStatus.REJECTED,
-          BookingStatus.NO_SHOW,
-        ].includes(booking.status as any);
+        [BookingStatus.COMPLETED, BookingStatus.CANCELED, BookingStatus.REJECTED, BookingStatus.NO_SHOW].includes(
+          booking.status as any,
+        );
       if (finalized) {
         return { message: 'booking finalized; ignored' };
       }
@@ -501,14 +414,14 @@ export class PaymentsService {
         if (newTransactionStatus === 'COMPLETED') {
           try {
             // *** LINHAS CORRIGIDAS ***
-            const b: BookingWithUsers | null =
-              await this.prisma.booking.findUnique({
-                where: { id: transaction.bookingId },
-                include: {
-                  provider: { include: { user: true } },
-                  client: { include: { user: true } },
-                },
-              });
+            // Removendo o 'as any' e usando o tipo tipado corretamente.
+            const b: BookingWithUsers | null = await this.prisma.booking.findUnique({
+              where: { id: transaction.bookingId },
+              include: {
+                provider: { include: { user: true } },
+                client: { include: { user: true } },
+              },
+            });
             // *** FIM DA CORREÇÃO DE TIPAGEM ***
 
             if (b?.provider?.userId) {
@@ -524,7 +437,7 @@ export class PaymentsService {
                 idempotencyKey: `evt:booking_confirmed:${b.id}:provider`,
               });
             }
-          } catch (e: any) {
+          } catch (e) {
             this.logger.warn(
               `[PaymentsService] Falha ao enfileirar notificação de confirmação para booking ${transaction.bookingId}: ${e?.message || e}`,
             );
@@ -543,6 +456,7 @@ export class PaymentsService {
       };
     }
   }
+
 
   // Admin: listar transações com filtros básicos
   async listTransactions(type?: string, status?: string) {
@@ -909,53 +823,173 @@ export class PaymentsService {
         ? new Date(expirationDateStr)
         : expiration; // fallback to requested expiration if API omits
 
-    const createdIntent = await this.prisma.paymentIntent.upsert({
-      where: { bookingId },
-      create: {
-        bookingId,
-        amountCents,
-        gateway: 'PAGSEGURO_ORDER_PIX',
-        externalOrderId: orderId,
-        externalChargeId: chargeId,
-        externalQrCodeId: qrCodeId,
-        qrCodeText,
-        qrCodeUrl,
-        expiresAt,
-        status,
-        idempotencyKey: idemKey,
-      },
-      update: {
-        amountCents,
-        externalOrderId: orderId,
-        externalChargeId: chargeId,
-        externalQrCodeId: qrCodeId,
-        qrCodeText,
-        qrCodeUrl,
-        expiresAt,
-        status,
-        idempotencyKey: idemKey,
+    const paymentIntentRecord = await this.prisma.paymentIntent.upsert({
+  where: { bookingId },
+  create: {
+    bookingId,
+    amountCents,
+    gateway: 'PAGSEGURO_ORDER_PIX',
+    externalOrderId: orderId,
+    externalChargeId: chargeId,
+    externalQrCodeId: qrCodeId,
+    qrCodeText,
+    qrCodeUrl,
+    expiresAt,
+    status,
+    idempotencyKey: idemKey,
+  },
+  update: {
+    amountCents,
+    externalOrderId: orderId,
+    externalChargeId: chargeId,
+    externalQrCodeId: qrCodeId,
+    qrCodeText,
+    qrCodeUrl,
+    expiresAt,
+    status,
+    idempotencyKey: idemKey,
+  },
+}); // colocar o booking como PENDING (aguardando pagamento)
+
+    await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: { status: BookingStatus.PENDING },
+    }); // === 7. RESPONDER AO APP NO NOVO FORMATO ===
+
+   return {
+  orderId,
+  chargeId,
+  status: 'PENDING',
+  qrCodeText,
+  qrCodeImageUrl,
+  expiresAt: expiresAt.toISOString(),
+  amount: Number(amountCents) / 100,
+  description,
+  bookingId,
+  providerId,
+
+  // === PROPRIEDADES FALTANTES CORRIGIDAS ===
+  id: paymentIntentRecord.id, // Adiciona o ID interno
+  amountCents: amountCents, // Adiciona o valor em centavos
+  // ==========================================
+
+} as PixChargeResponseDto;
+  }
+
+  async getPaymentIntentForBooking(
+    bookingId: string,
+    requesterUserId: string,
+  ): Promise<PaymentIntentResponseDto> {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        client: { include: { user: true } },
+        provider: { include: { user: true } },
       },
     });
-    
-    // Mapear para o DTO de resposta final
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterUserId },
+    });
+    const isOwner =
+      booking.client.userId === requesterUserId ||
+      booking.provider.userId === requesterUserId;
+    const isAdmin = requester?.role === UserRole.ADMIN;
+    if (!isOwner && !isAdmin)
+      throw new ForbiddenException('Not allowed to view this PaymentIntent');
+
+    const intent = await this.prisma.paymentIntent.findUnique({
+      where: { bookingId: booking.id },
+    });
+    if (!intent) throw new NotFoundException('PaymentIntent not found');
+    return this.mapPaymentIntent(intent);
+  }
+
+  async requestWithdrawal(
+    providerId: string,
+    dto: RequestWithdrawalDto,
+    idempotencyKey?: string,
+  ) {
+    const provider = await this.prisma.provider.findUnique({
+      where: { id: providerId },
+      select: { userId: true },
+    });
+    if (!provider) throw new NotFoundException('Provider not found');
+    return this.payoutsService.requestWithdrawal(
+      provider.userId,
+      dto as any,
+      idempotencyKey,
+    );
+  }
+
+  async handleWithdrawalWebhook(
+    signature: string,
+    eventId: string,
+    payload: any,
+  ) {
+    return this.payoutsService.handleGatewayWebhook(
+      signature,
+      eventId,
+      payload,
+    );
+  }
+
+  private mapPaymentIntent(
+    pi: Prisma.PaymentIntentUncheckedCreateInput & {
+      id: string;
+      createdAt?: any;
+      updatedAt?: any;
+    },
+  ): PaymentIntentResponseDto {
+    // Método auxiliar para mapear para DTO
+    const anyPi: any = pi;
     return {
-      // PROPRIEDADES QUE JÁ ESTAVAM NO RETORNO:
-      id: createdIntent.id, // ID interno
-      status: createdIntent.status,
-      qrCodeText: qrCodeText,
-      qrCodeUrl: qrCodeUrl,
-      expiresAt: expiresAt.toISOString(),
-      amountCents: createdIntent.amountCents, // ou dto.amount * 100, dependendo de como você calculou
-      
-      // PROPRIEDADES QUE ESTAVAM FALTANDO:
-      orderId: orderId, // ID da ordem PagBank (ORDE_*)
-      chargeId: chargeId, // ID da cobrança PagBank (CHAR_*)
-      amount: createdIntent.amountCents / 100, // Ou dto.amount
-      description: dto.description,
-      bookingId: dto.bookingId,
-      providerId: dto.providerId,
-      // Se você está incluindo o PaymentIntentResponseDto:
-      paymentIntent: null, // Pode ser null, undefined, ou um objeto mapeado, dependendo da sua lógica.
-    } as PixChargeResponseDto; // O 'as' é opcional, mas pode ajudar o compilador a entender a estrutura
+      id: anyPi.id,
+      bookingId: anyPi.bookingId,
+      amountCents: anyPi.amountCents,
+      amount: anyPi.amountCents / 100,
+      status: anyPi.status,
+      gateway: anyPi.gateway,
+      externalRef: anyPi.externalRef ?? null,
+      externalOrderId: anyPi.externalOrderId ?? null,
+      externalChargeId: anyPi.externalChargeId ?? null,
+      externalQrCodeId: anyPi.externalQrCodeId ?? null,
+      qrCodeUrl: anyPi.qrCodeUrl ?? null,
+      qrCodeText: anyPi.qrCodeText ?? null,
+      expiresAt: anyPi.expiresAt
+        ? new Date(anyPi.expiresAt).toISOString()
+        : null,
+      createdAt: (anyPi.createdAt instanceof Date
+        ? anyPi.createdAt
+        : new Date(anyPi.createdAt)
+      ).toISOString(),
+      updatedAt: (anyPi.updatedAt instanceof Date
+        ? anyPi.updatedAt
+        : new Date(anyPi.updatedAt)
+      ).toISOString(),
+    };
+  }
+
+  // Process recurring payment for a generated booking (via subscription)
+  async processRecurringPayment(
+    clientUserId: string,
+    subscriptionId: string,
+    bookingId: string,
+    amount: number,
+  ): Promise<void> {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { providerId: true },
+    });
+    if (!booking?.providerId) {
+      throw new NotFoundException('Provider not found for booking.');
+    }
+    await this.createPixCharge(clientUserId, {
+      amount,
+      description: `Recurring payment for subscription ${subscriptionId}`,
+      bookingId,
+      providerId: booking.providerId,
+    });
   }
 }

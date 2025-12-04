@@ -50,7 +50,7 @@ export class CreatePixChargeDto {
 // DTO de resposta para a criação de uma cobrança PIX
 // Este DTO representa o que a API *retornará* para o cliente após a criação da cobrança.
 export class PixChargeResponseDto {
-  // ID interno do PaymentIntent (corrigido anteriormente)
+  // === PROPRIEDADE ADICIONADA NA CORREÇÃO ANTERIOR ===
   @ApiProperty({
     description: 'ID interno do PaymentIntent (referência principal no sistema)',
     example: 'uuid-do-payment-intent',
@@ -58,7 +58,8 @@ export class PixChargeResponseDto {
   @IsUUID()
   @IsNotEmpty()
   id: string;
-  
+  // ====================================================
+
   @ApiProperty({
     description: 'ID da ordem PagBank (ORDE_*)',
     example: 'ORDE_123',
@@ -98,8 +99,7 @@ export class PixChargeResponseDto {
   })
   @IsString()
   @IsNotEmpty()
-  // ✨ CORREÇÃO: Renomeado de qrCodeImageUrl para qrCodeUrl
-  qrCodeUrl: string; 
+  qrCodeImageUrl: string;
 
   @ApiProperty({
     description: 'Data e hora de expiração da cobrança no formato ISO 8601.',
@@ -115,12 +115,13 @@ export class PixChargeResponseDto {
   @IsNotEmpty()
   amount: number;
   
-  // Valor em centavos (corrigido anteriormente)
+  // === PROPRIEDADE ADICIONADA PARA CORRIGIR O NOVO ERRO DE TIPAGEM ===
   @ApiProperty({ description: 'Valor da cobrança em centavos', example: 15075 })
   @IsNumber()
   @Min(1)
   @IsNotEmpty()
   amountCents: number;
+  // ===================================================================
 
   @ApiProperty({
     description: 'Descrição da cobrança PIX',
