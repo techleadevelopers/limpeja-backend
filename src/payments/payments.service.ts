@@ -768,16 +768,20 @@ const paymentIntentRecord = await this.prisma.paymentIntent.upsert({
     amountCents,
     gateway: "PAGBANK_PIX",
 
-    // 🔥 IDs reais vindos do PagBank
-    externalOrderId: orderId,      // ORDE_*
-    externalChargeId: chargeId,    // CHAR_*
-    externalQrCodeId: qrCodeId,    // QRCODE ID se tiver
+    // 🔥 IDs reais do PagBank
+    externalOrderId: orderId,   
+    externalChargeId: chargeId,
+    externalQrCodeId: qrCodeId,
+
+    // 🔥 REFERÊNCIA DO PAGBANK (booking_xxxxx)
+    referenceId: referenceId,
+    externalRef: referenceId,
 
     qrCodeText,
     qrCodeUrl,
     expiresAt,
 
-    status, // normalmente PENDING
+    status,
     idempotencyKey: idemKey,
   },
   update: {
@@ -786,6 +790,10 @@ const paymentIntentRecord = await this.prisma.paymentIntent.upsert({
     externalOrderId: orderId,
     externalChargeId: chargeId,
     externalQrCodeId: qrCodeId,
+
+    // 🔥 GARANTE QUE ATUALIZA TAMBÉM
+    referenceId: referenceId,
+    externalRef: referenceId,
 
     qrCodeText,
     qrCodeUrl,

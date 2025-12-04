@@ -639,6 +639,7 @@ model PaymentIntent {
   externalOrderId    String?
   externalChargeId   String?
   externalQrCodeId   String?
+  referenceId        String?
   idempotencyKey     String?             @unique  // Garantir uso em API/seed para idempotência
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
