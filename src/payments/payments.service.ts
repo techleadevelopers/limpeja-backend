@@ -936,7 +936,7 @@ export class PaymentsService {
         idempotencyKey: idemKey,
       },
     });
-
+    
     // Mapear para o DTO de resposta final
     return {
       // PROPRIEDADES QUE JÁ ESTAVAM NO RETORNO:
