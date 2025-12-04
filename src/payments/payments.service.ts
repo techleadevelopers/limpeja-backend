@@ -16,6 +16,7 @@ import {
   TransactionType,
   UserRole,
   LedgerEntryType,
+  TransactionStatus,
 } from '@prisma/client';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -260,12 +261,16 @@ async handlePixWebhook(
     // }
 
     const chargeId =
-  data.chargeId ||
-  data.id ||
-  data.order_id ||
-  data.order?.id ||
-  data.resource_id ||
+  data?.charge?.id ||
+  data?.chargeId ||
+  data?.id ||
+  data?.charge_id ||
+  data?.transaction_id ||
+  data?.order_id ||
+  data?.order?.id ||
+  data?.resource_id ||
   null;
+
     const status = data.status ?? null;
 
     if (!chargeId) {
@@ -286,10 +291,11 @@ if (!intent) {
 await this.prisma.booking.update({
   where: { id: intent.bookingId },
   data: {
-    status: "CONFIRMED", // ou PAID dependendo de como você usa
+    status: "CONFIRMED",
     updatedAt: new Date(),
   },
 });
+
 
     return {
       success: true,
@@ -306,30 +312,52 @@ await this.prisma.booking.update({
 
 
   // Admin: listar transações com filtros básicos
-  async listTransactions(type?: string, status?: string) {
-    const where: Prisma.TransactionWhereInput = {};
-    if (type) where.type = type as any;
-    if (status) where.status = status;
-    const txs = await this.prisma.transaction.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
-    return txs.map((t) => ({
-      id: t.id,
-      providerId: t.providerId,
-      userId: undefined,
-      amount: Number(t.amount),
-      type: t.type,
-      status: t.status,
-      description: t.description,
-      createdAt: (t.createdAt as any as Date).toISOString(),
-      bookingId: t.bookingId,
-      gatewayTransactionId: t.gatewayTransactionId,
-      qrCodeUrl: t.qrCodeUrl,
-      transactionRef: t.transactionRef,
-      couponId: t.couponId,
-    }));
+async listTransactions(type?: string, status?: string) {
+  const where: Prisma.TransactionWhereInput = {};
+
+  // Format TYPE (string → enum)
+  if (type) {
+    const normalizedType = type.toUpperCase() as keyof typeof TransactionType;
+
+    if (TransactionType[normalizedType]) {
+      where.type = TransactionType[normalizedType];
+    } else {
+      throw new BadRequestException(`Tipo de transação inválido: ${type}`);
+    }
   }
+
+  // Format STATUS (string → enum)
+  if (status) {
+    const normalizedStatus = status.toUpperCase() as keyof typeof TransactionStatus;
+
+    if (TransactionStatus[normalizedStatus]) {
+      where.status = TransactionStatus[normalizedStatus];
+    } else {
+      throw new BadRequestException(`Status de transação inválido: ${status}`);
+    }
+  }
+
+  const txs = await this.prisma.transaction.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+  });
+
+  return txs.map((t) => ({
+    id: t.id,
+    providerId: t.providerId,
+    userId: undefined, // preservado exatamente como no seu código
+    amount: Number(t.amount),
+    type: t.type,
+    status: t.status,
+    description: t.description,
+    createdAt: t.createdAt.toISOString(),
+    bookingId: t.bookingId,
+    gatewayTransactionId: t.gatewayTransactionId,
+    qrCodeUrl: t.qrCodeUrl,
+    transactionRef: t.transactionRef,
+    couponId: t.couponId,
+  }));
+}
 
   // Admin: listar saques (Payouts) com mapeamento simples
   async listWithdrawals(status?: string) {
@@ -484,7 +512,7 @@ await this.prisma.booking.update({
         providerId: tx.providerId || undefined,
         amount: refundAmount,
         type: TransactionType.REFUND,
-        status: 'COMPLETED',
+        status: TransactionStatus.PAID,
         description: `Refund for ${tx.id}`,
         bookingId: tx.bookingId || undefined,
       },
@@ -704,10 +732,14 @@ const paymentIntentRecord = await this.prisma.paymentIntent.upsert({
     idempotencyKey: idemKey,
   },
 });
-    await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: BookingStatus.PENDING },
-    }); // === 7. RESPONDER AO APP NO NOVO FORMATO ===
+  await this.prisma.booking.update({
+  where: { id: bookingId },
+  data: {
+    // ❌ remover isso caso esteja aqui:
+    // paymentStatus: 'PAID'
+  }
+});
+ // === 7. RESPONDER AO APP NO NOVO FORMATO ===
 
     return {
       orderId,

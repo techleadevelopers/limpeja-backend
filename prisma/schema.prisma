@@ -43,6 +43,15 @@ enum PricingType {
   CUSTOM_QUOTE
 }
 
+enum TransactionStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELED
+  REFUNDED
+  PROCESSED   // <-- ADICIONE ISSO
+}
+
 enum BookingStatus {
   PENDING
   CONFIRMED
@@ -591,28 +600,32 @@ model Offer {
 }
 
 model Transaction {
-  id                   String      @id @default(uuid())
+  id                   String            @id @default(uuid())
   providerId           String
-  provider             Provider    @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  amount               Decimal     @db.Decimal(10, 2)
+  provider             Provider          @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  amount               Decimal           @db.Decimal(10, 2)
   type                 TransactionType
-  status               String
+  status               TransactionStatus @default(PENDING)
   description          String?
-  createdAt            DateTime    @default(now())
+  createdAt            DateTime          @default(now())
+
   bookingId            String?
-  booking              Booking?    @relation(fields: [bookingId], references: [id])
-  gatewayTransactionId String?     @unique
+  booking              Booking?          @relation(fields: [bookingId], references: [id])
+
+  gatewayTransactionId String?           @unique
   qrCodeUrl            String?
   transactionRef       String?
-  couponId             String?
-  coupon               Coupon?     @relation(fields: [couponId], references: [id])
-  pixKeyType           PixKeyType?
-  pixKey               String?     // Chave PIX em texto puro (sensível); aplicar mascaramento/hash na aplicação e limpar este campo após migração (considerar virtual)
-  pixKeyMasked         String?     // ADICIONADO: Versão mascarada/hash para armazenamento seguro (ex: últimos dígitos ou hash); sempre popular na aplicação (backfill histórico recomendado)
 
-  // ADICIONADO: Índice para extrato de ganhos do provedor (últimas transações por provider/status/createdAt)
+  couponId             String?
+  coupon               Coupon?           @relation(fields: [couponId], references: [id])
+
+  pixKeyType           PixKeyType?
+  pixKey               String?           // valor sensível
+  pixKeyMasked         String?           // versão mascarada para exibição segura
+
   @@index([providerId, status, createdAt])
 }
+
 
 model PaymentIntent {
   id                 String              @id @default(uuid())
