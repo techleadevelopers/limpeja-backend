@@ -600,11 +600,10 @@ export class PayoutsService {
         `[PayoutsService] Delegando evento '${eventType}' para PaymentsService.handlePixPaymentWebhook.`,
       );
       // Passa 'undefined' para os argumentos de segurança (signature/rawBody) que não são mais usados.
-      await this.paymentsService.handlePixWebhook(
-        undefined, 
-     
-        undefined
-      );
+     await this.paymentsService.handlePixWebhook(
+    undefined, // NÃO TEM MAIS RAWPAYLOAD
+    payload    // webhookData (único dado que importa agora)
+  );
       return { ok: true }; // Termina o processamento aqui
     }
 

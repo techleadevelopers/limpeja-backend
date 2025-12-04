@@ -156,24 +156,37 @@ export class PaymentsController {
   // Webhook PIX PagBank — RAW (URLENCODED)
   // ===========================================================================
 @Post('webhook/pix')
-@HttpCode(200)
-@ApiOperation({
-  summary: 'Webhook PIX PagBank usando RAW body.',
-})
-public async handlePixWebhook(@Req() req: Request) {
-  // Nest/Express pode expor rawBody assim quando habilitado:
-  const rawBody =
-    (req as any).rawBody ||
-    req.body ||
-    null;
+@Header('Content-Type', 'application/json')
+@HttpCode(HttpStatus.OK)
+public async handlePixWebhook(
+  @Req() req: Request,
+  @Res() res: Response,
+) {
+  const rawBody: string =
+    (req as any).rawBody?.toString?.() ??
+    (req as any).bodyRaw?.toString?.() ??
+    '';
 
-  const parsed =
-    typeof req.body === 'object' ? req.body : null;
+  let parsed: any;
 
-  return await this.paymentsService.handlePixWebhook(rawBody, parsed);
+  try {
+    // 1 → tenta JSON normalmente
+    parsed = JSON.parse(rawBody);
+    console.log('[Webhook PIX] JSON parseado com sucesso');
+  } catch {
+    console.log('[Webhook PIX] JSON inválido → usando string bruta');
+
+    // 2 → tenta transformar form-data URL-encoded para objeto
+    parsed = Object.fromEntries(new URLSearchParams(rawBody));
+  }
+
+  const result = await this.paymentsService.handlePixWebhook(
+    rawBody,
+    parsed
+  );
+
+  return res.status(200).json(result);
 }
-
-
   // ===========================================================================
   // Webhook Withdrawal
   // ===========================================================================
