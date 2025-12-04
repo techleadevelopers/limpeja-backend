@@ -259,7 +259,13 @@ async handlePixWebhook(
     //   "status": "PAID"
     // }
 
-    const chargeId = data.chargeId ?? data.id ?? null;
+    const chargeId =
+  data.chargeId ||
+  data.id ||
+  data.order_id ||
+  data.order?.id ||
+  data.resource_id ||
+  null;
     const status = data.status ?? null;
 
     if (!chargeId) {
@@ -664,34 +670,40 @@ await this.prisma.booking.update({
         ? new Date(expirationDateStr)
         : expiration; // fallback to requested expiration if API omits
 
-    const paymentIntentRecord = await this.prisma.paymentIntent.upsert({
-      where: { bookingId },
-      create: {
-        bookingId,
-        amountCents,
-        gateway: 'PAGSEGURO_ORDER_PIX',
-        externalOrderId: orderId,
-        externalChargeId: chargeId,
-        externalQrCodeId: qrCodeId,
-        qrCodeText,
-        qrCodeUrl,
-        expiresAt,
-        status,
-        idempotencyKey: idemKey,
-      },
-      update: {
-        amountCents,
-        externalOrderId: orderId,
-        externalChargeId: chargeId,
-        externalQrCodeId: qrCodeId,
-        qrCodeText,
-        qrCodeUrl,
-        expiresAt,
-        status,
-        idempotencyKey: idemKey,
-      },
-    }); // colocar o booking como PENDING (aguardando pagamento)
+const paymentIntentRecord = await this.prisma.paymentIntent.upsert({
+  where: { bookingId },
+  create: {
+    bookingId,
+    amountCents,
+    gateway: "PAGBANK_PIX",
 
+    // 🔥 IDs reais vindos do PagBank
+    externalOrderId: orderId,      // ORDE_*
+    externalChargeId: chargeId,    // CHAR_*
+    externalQrCodeId: qrCodeId,    // QRCODE ID se tiver
+
+    qrCodeText,
+    qrCodeUrl,
+    expiresAt,
+
+    status, // normalmente PENDING
+    idempotencyKey: idemKey,
+  },
+  update: {
+    amountCents,
+
+    externalOrderId: orderId,
+    externalChargeId: chargeId,
+    externalQrCodeId: qrCodeId,
+
+    qrCodeText,
+    qrCodeUrl,
+    expiresAt,
+
+    status,
+    idempotencyKey: idemKey,
+  },
+});
     await this.prisma.booking.update({
       where: { id: bookingId },
       data: { status: BookingStatus.PENDING },
