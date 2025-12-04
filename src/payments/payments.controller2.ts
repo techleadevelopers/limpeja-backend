@@ -173,7 +173,7 @@ try {
   const text = Buffer.isBuffer(rawBody)
     ? rawBody.toString('utf8')
     : rawBody;
-
+    
   // 1 → tenta JSON normalmente
   parsed = JSON.parse(text);
   console.log('[Webhook PIX] JSON parseado com sucesso');
