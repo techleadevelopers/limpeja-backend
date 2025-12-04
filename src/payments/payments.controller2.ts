@@ -217,11 +217,11 @@ export class PaymentsController {
 
       // Chamando o service, passando o rawBody para que ele possa processar o dado bruto se necessário.
       return await this.paymentsService.handlePixWebhook(
-        undefined, // signature
-        undefined, // eventId
-        webhookData,
-        rawBody instanceof Buffer ? rawBody : undefined, // Passa o Buffer bruto se ele for um Buffer
-      );
+  rawBody, // agora é o primeiro argumento correto
+  undefined, // eventId opcional
+  webhookData // metadata
+);
+
     } catch (error: any) {
       this.logger.error(
         'Erro ao processar webhook PIX no controller:',
