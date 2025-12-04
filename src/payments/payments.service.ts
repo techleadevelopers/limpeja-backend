@@ -163,7 +163,6 @@ async handlePaymentWebhook(
     );
     throw new ForbiddenException('Assinatura de Webhook Inválida.');
   }
-
   // 2. Processamento do Evento (CORRIGIDO)
   const status = payload?.transaction?.status
     ? String(payload.transaction.status).toUpperCase()
