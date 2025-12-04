@@ -168,18 +168,21 @@ public async handlePixWebhook(
     '';
 
   let parsed: any;
+try {
+  // Se vier Buffer → converte pra string antes
+  const text = Buffer.isBuffer(rawBody)
+    ? rawBody.toString('utf8')
+    : rawBody;
 
-  try {
-    // 1 → tenta JSON normalmente
-    parsed = JSON.parse(rawBody);
-    console.log('[Webhook PIX] JSON parseado com sucesso');
-  } catch {
-    console.log('[Webhook PIX] JSON inválido → usando string bruta');
+  // 1 → tenta JSON normalmente
+  parsed = JSON.parse(text);
+  console.log('[Webhook PIX] JSON parseado com sucesso');
+} catch {
+  console.log('[Webhook PIX] JSON inválido → usando string bruta');
 
-    // 2 → tenta transformar form-data URL-encoded para objeto
-    parsed = Object.fromEntries(new URLSearchParams(rawBody));
-  }
-
+  // 2 → tenta transformar form-data URL-encoded para objeto
+  parsed = Object.fromEntries(new URLSearchParams(rawBody?.toString() ?? ""));
+}
   const result = await this.paymentsService.handlePixWebhook(
     rawBody,
     parsed
