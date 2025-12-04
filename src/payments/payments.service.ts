@@ -252,7 +252,7 @@ async handlePixWebhook(
       data = parsedBody;
     }
 
-    // 2. SE NÃO TEVE PARSED → tenta JSON puro
+    // 2. SE NÃO VEIO PARSED → tenta JSON puro
     if (!data && rawBody) {
       try {
         data = JSON.parse(rawBody.toString());
@@ -265,7 +265,37 @@ async handlePixWebhook(
 
     if (!data) return { success: false, message: "Webhook vazio" };
 
-    // 3. DETECTA O CHARGEID EM QUALQUER FORMATO
+    console.log(">>> WEBHOOK PARSED:", data);
+
+    // ---------------------------------------------------------
+    // 🔥🔥🔥 AQUI ESTÁ O BLOCO DO "PAID" QUE VOCÊ PEDIU 🔥🔥🔥
+    // ---------------------------------------------------------
+
+    const qr =
+      data?.qr_codes?.[0] ||
+      data?.charges?.[0]?.payment_method?.qr_code;
+
+    if (qr?.status === 'PAID') {
+      console.log('⚡ PAGAMENTO PIX CONFIRMADO (PAID) ⚡');
+
+      const referenceId =
+        qr.reference_id ||
+        data.reference_id ||
+        data?.charges?.[0]?.reference_id;
+
+      console.log('REFERENCE_ID:', referenceId);
+
+      // chama sua função de confirmar pagamento
+      await this.confirmPixPayment(referenceId);
+
+      return { ok: true };
+    }
+
+    // ---------------------------------------------------------
+    // 🔥 FIM DO BLOCO QUE VOCÊ MANDOU 🔥
+    // ---------------------------------------------------------
+
+    // 3. DETECTA CHARGE ID
     const chargeId =
       data?.charge?.id ||
       data?.chargeId ||
@@ -311,6 +341,35 @@ async handlePixWebhook(
     console.error("Erro no webhook PIX:", err);
     return { success: false, message: "Erro interno no webhook" };
   }
+}
+async confirmPixPayment(referenceId: string) {
+  console.log(">>> CONFIRMANDO PIX PARA REFERENCE:", referenceId);
+
+  if (!referenceId) {
+    console.warn("confirmPixPayment chamado sem referenceId");
+    return;
+  }
+
+  const intent = await this.prisma.paymentIntent.findFirst({
+    where: {
+      OR: [
+        { externalOrderId: referenceId },
+        { externalChargeId: referenceId },
+      ],
+    },
+  });
+
+  if (!intent) {
+    console.warn("Nenhum PaymentIntent encontrado para referência:", referenceId);
+    return;
+  }
+
+  await this.prisma.booking.update({
+    where: { id: intent.bookingId },
+    data: { status: "CONFIRMED" },
+  });
+
+  console.log("✓ Booking confirmado via PIX:", intent.bookingId);
 }
 
 
