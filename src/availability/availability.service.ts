@@ -110,8 +110,8 @@ export class AvailabilityService {
         status: {
           in: [
             BookingStatus.CONFIRMED,
-            BookingStatus.COMPLETED,
-            BookingStatus.IN_PROGRESS,
+            BookingStatus.FINISHED,
+            BookingStatus.STARTED,
             BookingStatus.PENDING, // incluir pendentes (aguardando pagamento)
           ], // Include IN_PROGRESS
         },
@@ -179,8 +179,8 @@ export class AvailabilityService {
             in: [
               BookingStatus.PENDING,
               BookingStatus.CONFIRMED,
-              BookingStatus.IN_PROGRESS,
-              BookingStatus.COMPLETED,
+              BookingStatus.STARTED,
+              BookingStatus.FINISHED,
             ],
           },
           scheduledDate: { gte: nowStartDay },
@@ -323,8 +323,8 @@ export class AvailabilityService {
           in: [
             BookingStatus.PENDING,
             BookingStatus.CONFIRMED,
-            BookingStatus.IN_PROGRESS,
-            BookingStatus.COMPLETED,
+            BookingStatus.STARTED,
+            BookingStatus.FINISHED,
           ],
         },
         scheduledDate: { gte: nowStart },

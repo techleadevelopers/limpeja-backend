@@ -60,6 +60,15 @@ export type ReviewListResult = Prisma.ReviewGetPayload<{
     };
   };
 }>;
+export type BookingWithRelationsForReview = Prisma.BookingGetPayload<{
+  include: {
+    client: true;
+    provider: { include: { user: true } };
+    paymentIntent: true;
+    review: true;
+    providerService: true;
+  };
+}>;
 
 // O tipo ReviewWithIncludes original (completo)
 export type ReviewWithIncludes = Prisma.ReviewGetPayload<{
@@ -93,15 +102,15 @@ export interface SmartSuggestion {
 
 // Tipo auxiliar para sugestões
 type ProviderWithRelationsForSuggestions = Prisma.ProviderGetPayload<{
-  include: {
-    providerServices: { include: { service: true } };
-    reviewsReceived: { orderBy: { createdAt: 'desc' }; take: 50 };
-    bookings: {
-      where: { status: 'COMPLETED' };
-      orderBy: { createdAt: 'desc' };
-      take: 100;
-    };
-  };
+  include: {
+    providerServices: { include: { service: true } };
+    reviewsReceived: { orderBy: { createdAt: 'desc' }; take: 50 };
+    bookings: {
+      where: { status: 'FINISHED' }; // ✅ CORREÇÃO AQUI (trocou BookingStatus.FINISHED por 'FINISHED')
+      orderBy: { createdAt: 'desc' };
+      take: 100;
+    };
+  };
 }>;
 
 @Injectable()
@@ -134,17 +143,17 @@ export class ReviewsService {
     return new Date(base.getTime() + dur * 60000);
   }
 
-  async canReview(bookingId: string, userId: string) {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: {
-        client: true,
-        provider: { include: { user: true } },
-        paymentIntent: true,
-        review: true,
-        providerService: true,
-      },
-    });
+async canReview(bookingId: string, userId: string) {
+  const booking = (await this.prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: {
+      client: true,
+      provider: { include: { user: true } },
+      paymentIntent: true,
+      review: true,
+      providerService: true,
+    },
+  })) as BookingWithRelationsForReview | null; // 👈 CORREÇÃO AQUI
     if (!booking) return { canReview: false, reason: 'not_found' };
     
     // CORREÇÃO IMPLÍCITA: Os erros 2551/2339 para .client, .review e .paymentIntent
@@ -153,7 +162,7 @@ export class ReviewsService {
     if (booking.client?.userId !== userId)
       return { canReview: false, reason: 'forbidden' };
       
-    if (booking.status !== BookingStatus.COMPLETED)
+    if (booking.status !== BookingStatus.FINISHED)
       return { canReview: false, reason: 'not_completed' };
       
     const expectedEnd = booking.completedAt ?? this.computeExpectedEnd(booking);
@@ -217,7 +226,7 @@ export class ReviewsService {
           );
         }
 
-        if (booking.status !== BookingStatus.COMPLETED) {
+        if (booking.status !== BookingStatus.FINISHED) {
           throw new BadRequestException(
             "A avaliação só pode ser enviada para agendamentos concluídos.",
           );
@@ -482,18 +491,18 @@ export class ReviewsService {
   ): Promise<SmartSuggestion[]> {
     const suggestions: SmartSuggestion[] = [];
 
-    const provider = (await this.prisma.provider.findUnique({
-      where: { id: providerId },
-      include: {
-        providerServices: { include: { service: true } },
-        reviewsReceived: { orderBy: { createdAt: 'desc' }, take: 50 },
-        bookings: {
-          where: { status: BookingStatus.COMPLETED },
-          orderBy: { createdAt: 'desc' },
-          take: 100,
-        },
-      },
-    })) as ProviderWithRelationsForSuggestions | null;
+   const provider = (await this.prisma.provider.findUnique({
+    where: { id: providerId },
+    include: {
+      providerServices: { include: { service: true } },
+      reviewsReceived: { orderBy: { createdAt: 'desc' }, take: 50 },
+      bookings: {
+        where: { status: 'FINISHED' }, // ✅ CORREÇÃO AQUI (trocou BookingStatus.FINISHED por 'FINISHED')
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      },
+    },
+  })) as ProviderWithRelationsForSuggestions | null;
 
     if (!provider) return suggestions;
 

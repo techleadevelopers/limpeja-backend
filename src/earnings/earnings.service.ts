@@ -64,7 +64,7 @@ export class EarningsService {
             BookingStatus.PENDING,
             BookingStatus.CONFIRMED,
             BookingStatus.RESCHEDULED,
-            BookingStatus.IN_PROGRESS,
+            BookingStatus.STARTED,
           ],
         },
         paymentIntent: {

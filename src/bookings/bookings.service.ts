@@ -1,5 +1,4 @@
-// src/bookings/bookings.service.ts
-
+// ...existing code...
 import {
   Injectable,
   NotFoundException,
@@ -143,6 +142,42 @@ export class BookingsService {
     const M = String(isFinite(mm) ? mm : 0).padStart(2, '0');
     const isoLocal = `${y}-${m}-${day}T${H}:${M}:00`;
     return this.resolveDateWithTimezone(isoLocal, 'America/Sao_Paulo');
+  }
+
+  // Helper: common notification helper to inform client about provider status updates
+  private async notifyClientStatusUpdate(
+    booking: BookingWithDetailsRelations | any,
+    status: BookingStatus,
+  ) {
+    const locale = 'pt-BR';
+    const userId = booking.client?.userId;
+    if (!userId) return;
+    let title = 'Atualização de atendimento';
+    let body = 'Status do seu atendimento atualizado.';
+    if (status === BookingStatus.ON_THE_WAY) {
+      title = 'Prestador a caminho';
+      body = `O prestador está a caminho do seu endereço para o serviço ${booking.id}.`;
+    } else if (status === BookingStatus.ARRIVED) {
+      title = 'Prestador chegou';
+      body = `O prestador chegou ao local para o atendimento ${booking.id}.`;
+    } else if (status === BookingStatus.STARTED) {
+      title = 'Serviço iniciado';
+      body = `O prestador iniciou o serviço ${booking.id}.`;
+    } else if (status === BookingStatus.FINISHED) {
+      title = 'Serviço finalizado';
+      body = `O prestador finalizou o serviço ${booking.id}.`;
+    }
+    try {
+      await this.queuesService.addNotificationJob('send-notification', {
+        userId,
+        kind: status === BookingStatus.FINISHED ? 'booking_finished' : 'booking_status',
+        title,
+        body,
+        targetUrl: `/client/bookings/${booking.id}`,
+      });
+    } catch (e) {
+      this.logger.warn(`[BookingsService] notifyClientStatusUpdate falhou: ${e?.message || e}`);
+    }
   }
 
   async create(
@@ -575,8 +610,8 @@ export class BookingsService {
           in: [
             BookingStatus.PENDING,
             BookingStatus.CONFIRMED,
-            BookingStatus.IN_PROGRESS,
-          ], // Consider only active bookings
+            BookingStatus.STARTED,
+          ], // Consider only active bookings (STARTED instead of IN_PROGRESS)
         },
       },
     });
@@ -855,7 +890,7 @@ export class BookingsService {
 
     // Bloqueia reprocessamento de estados finais (exceto ADMIN)
     const finalizedStates = [
-      BookingStatus.COMPLETED,
+      BookingStatus.FINISHED,
       BookingStatus.CANCELED,
       BookingStatus.REJECTED,
       BookingStatus.NO_SHOW,
@@ -880,7 +915,7 @@ export class BookingsService {
     } else if (userRole === UserRole.CLIENT) {
       if (newStatus === BookingStatus.CANCELED) {
         if (
-          booking.status === BookingStatus.COMPLETED ||
+          booking.status === BookingStatus.FINISHED ||
           booking.status === BookingStatus.CANCELED ||
           booking.status === BookingStatus.REJECTED
         ) {
@@ -906,8 +941,10 @@ export class BookingsService {
           break;
         case BookingStatus.CONFIRMED:
           if (
-            newStatus === BookingStatus.IN_PROGRESS ||
-            newStatus === BookingStatus.COMPLETED ||
+            newStatus === BookingStatus.ON_THE_WAY ||
+            newStatus === BookingStatus.ARRIVED ||
+            newStatus === BookingStatus.STARTED ||
+            newStatus === BookingStatus.FINISHED ||
             newStatus === BookingStatus.CANCELED ||
             newStatus === BookingStatus.RESCHEDULED
           ) {
@@ -916,9 +953,9 @@ export class BookingsService {
             errorMessageKey = 'booking.badRequest.providerConfirmedStatus';
           }
           break;
-        case BookingStatus.IN_PROGRESS:
+        case BookingStatus.STARTED:
           if (
-            newStatus === BookingStatus.COMPLETED ||
+            newStatus === BookingStatus.FINISHED ||
             newStatus === BookingStatus.CANCELED
           ) {
             canUpdate = true;
@@ -936,7 +973,7 @@ export class BookingsService {
             errorMessageKey = 'booking.badRequest.providerRescheduledStatus';
           }
           break;
-        case BookingStatus.COMPLETED:
+        case BookingStatus.FINISHED:
         case BookingStatus.CANCELED:
         case BookingStatus.REJECTED:
           errorMessageKey = 'booking.badRequest.statusFinalized';
@@ -950,7 +987,7 @@ export class BookingsService {
     if (
       userRole === UserRole.PROVIDER &&
       booking.status === BookingStatus.CONFIRMED &&
-      newStatus === BookingStatus.COMPLETED
+      newStatus === BookingStatus.FINISHED
     ) {
       canUpdate = false;
       errorMessageKey = 'booking.badRequest.providerConfirmedStatus';
@@ -974,10 +1011,11 @@ export class BookingsService {
     const now = new Date();
     const dataToUpdate: Prisma.BookingUpdateInput = { status: newStatus };
 
+    // Ajuste: somente permitir STARTED quando booking estiver ARRIVED
     if (
       userRole === UserRole.PROVIDER &&
-      booking.status === BookingStatus.CONFIRMED &&
-      newStatus === BookingStatus.IN_PROGRESS
+      booking.status === BookingStatus.ARRIVED &&
+      newStatus === BookingStatus.STARTED
     ) {
       const scheduledAt = this.getScheduledAtInSaoPaulo(
         booking.scheduledDate,
@@ -1003,10 +1041,11 @@ export class BookingsService {
         null;
     }
 
+    // Ajuste: finalizar (FINISHED) somente quando booking estiver STARTED
     if (
       userRole === UserRole.PROVIDER &&
-      booking.status === BookingStatus.IN_PROGRESS &&
-      newStatus === BookingStatus.COMPLETED
+      booking.status === BookingStatus.STARTED &&
+      newStatus === BookingStatus.FINISHED
     ) {
       const payStatus = booking.paymentIntent?.status as
         | PaymentIntentStatus
@@ -1015,7 +1054,7 @@ export class BookingsService {
         throw new BadRequestException(
           await this.i18n
             .translate?.('booking.badRequest.unpaid', locale)
-            .catch?.(() => 'Pagamento n�o confirmado.'),
+            .catch?.(() => 'Pagamento não confirmado.'),
         );
       }
       const minRunMinutes = Math.max(
@@ -1035,7 +1074,7 @@ export class BookingsService {
           .translate?.('booking.badRequest.finishTooEarly', locale)
           .catch?.(() => null);
         throw new BadRequestException(
-          msg || 'Finaliza��ǜo muito cedo em rela��ǜo ao hor��rio previsto.',
+          msg || 'Finalização muito cedo em relação ao horário previsto.',
         );
       }
       const runMin = Math.round(
@@ -1057,13 +1096,8 @@ export class BookingsService {
     }
 
     // --- NOVO: Lógica de Fidelização e Gamificação (após validação de status) ---
-    if (newStatus === BookingStatus.COMPLETED) {
-      // Increment completedBookingsCount for the client
-      // Fix: Access completedBookingsCount directly from the client object if it's a scalar field
-      // The error indicates `booking.client` might be missing, which is addressed by the include above.
-      // If `completedBookingsCount` is a scalar field, it's directly on `booking.client`.
-      // If it's a relation count, it would be `booking.client._count.bookings`.
-      // Assuming `completedBookingsCount` is a scalar field on Client model.
+    if (newStatus === BookingStatus.FINISHED) {
+      // Increment completedBookingsCount for the client (now triggered on FINISHED)
       await this.prisma.client.update({
         where: { id: booking.clientId },
         data: { completedBookingsCount: { increment: 1 } },
@@ -1082,7 +1116,6 @@ export class BookingsService {
       );
 
       // ADICIONAR PONTOS PARA O CLIENTE POR SERVIÇO CONCLUÍDO
-      // Assumindo que o valor base de pontos é 10 por serviço concluído.
       await this.loyaltyService.addPoints({
         userId: booking.client.userId,
         points: 10,
@@ -1098,7 +1131,6 @@ export class BookingsService {
       );
 
       // Enfileira notificação de review
-      // Fix: Ensure providerService and provider are included
       const reviewNotificationMessage = await this.i18n.translate(
         'notification.reviewRequest',
         locale,
@@ -1118,7 +1150,7 @@ export class BookingsService {
         `[BookingsService] updateStatus: Notificação de avaliação adicionada à fila para cliente ${booking.client.userId}.`,
       );
 
-      // >>> NOVO: Missões -- evento de conclusão
+      // >>> NOVO: Missões -- evento de conclusão (agora disparado em FINISHED)
       try {
         await this.missionsService.trackEvent(
           booking.client.userId,
@@ -1134,9 +1166,7 @@ export class BookingsService {
         );
 
         // NOVO: Missões -- evento 'first_booking_completed'
-        // Se este é o primeiro booking COMPLETED do cliente
         if (prevCompletedCount === 0) {
-          // Use optional chaining
           await this.missionsService.trackEvent(
             booking.client.userId,
             'first_booking_completed',
@@ -1170,7 +1200,7 @@ export class BookingsService {
         );
       }
 
-      // >>> NOVO: Indicações -- verificar conversão do indicado (1º COMPLETED)
+      // >>> NOVO: Indicações -- verificar conversão do indicado (1º FINISHED)
       try {
         await this.referralsService.handleBookingCompletedForReferral(
           booking.client.userId,
@@ -1182,19 +1212,6 @@ export class BookingsService {
         );
       }
       // <<< FIM NOVO
-
-      // NOVO: Missões -- evento 'booking_accepted' (para provedor)
-      // Este evento seria disparado quando o provedor aceita o booking, não quando ele é COMPLETED.
-      // A lógica para isso estaria na transição de PENDING para CONFIRMED.
-      // Exemplo:
-      // if (newStatus === BookingStatus.CONFIRMED && booking.status === BookingStatus.PENDING) {
-      //   await this.missionsService.trackEvent(booking.provider.userId, 'booking_accepted', { bookingId: booking.id });
-      // }
-
-      // NOVO: Atualizar métricas de performance do provedor (aceitação, tempo de resposta)
-      // Isso seria feito por um job agendado ou um hook mais específico
-      // await this.providersService.updateProviderPerformanceMetrics(booking.providerId);
-      // this.logger.log(`[BookingsService] updateStatus: Acionada atualização de métricas de performance para provedor ${booking.providerId}.`);
     }
 
     // Métricas de cancelamento / no show
@@ -1302,9 +1319,9 @@ export class BookingsService {
       }
     }
 
-    // Ledger: creditar ganho e fee ao concluir (idempotente)
+    // Ledger: creditar ganho e fee ao concluir (idempotente) - agora disparado por FINISHED
     if (
-      newStatus === BookingStatus.COMPLETED &&
+      newStatus === BookingStatus.FINISHED &&
       updatedBooking.provider?.userId
     ) {
       const exists = await this.prisma.ledgerEntry.findFirst({
@@ -1426,7 +1443,7 @@ export class BookingsService {
             BookingStatus.PENDING,
             BookingStatus.CONFIRMED,
             BookingStatus.RESCHEDULED,
-            BookingStatus.IN_PROGRESS,
+            BookingStatus.STARTED, // adjusted
           ],
         },
         scheduledDate: {
@@ -1506,7 +1523,7 @@ export class BookingsService {
         clientId: clientId,
         providerId: providerId,
         status: {
-          in: [BookingStatus.CONFIRMED, BookingStatus.IN_PROGRESS],
+          in: [BookingStatus.CONFIRMED, BookingStatus.STARTED],
         },
       },
       orderBy: {
@@ -1533,7 +1550,7 @@ export class BookingsService {
     if (!booking) return { canReview: false, reason: 'not_found' };
     if (booking.client?.userId !== userId)
       return { canReview: false, reason: 'forbidden' };
-    if (booking.status !== BookingStatus.COMPLETED)
+    if (booking.status !== BookingStatus.FINISHED)
       return { canReview: false, reason: 'not_completed' };
     const expectedEnd = booking.completedAt ?? this.getExpectedEnd(booking);
     if (new Date() < expectedEnd)
@@ -1554,6 +1571,77 @@ export class BookingsService {
     };
   }
 
+  // NOVO: provider marca que está a caminho (CONFIRMED -> ON_THE_WAY)
+  async onTheWayService(bookingId: string, actorUserId: string): Promise<BookingWithDetailsRelations> {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: { client: { include: { user: true } }, provider: { include: { user: true } } },
+    });
+    if (!booking) throw new NotFoundException('Booking não encontrado.');
+    if (booking.provider.userId !== actorUserId) throw new ForbiddenException('Somente o prestador pode atualizar.');
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException(`Não é possível iniciar o trajeto: status atual é ${booking.status}.`);
+    }
+
+// bloco de onTheWayService
+const updated = await this.prisma.booking.update({
+    where: { id: bookingId },
+    data: { status: BookingStatus.ON_THE_WAY },
+    include: {
+        client: { include: { user: true } },
+        provider: { include: { user: true } },
+        providerService: { include: { service: true } },
+        review: true,
+        address: true,
+        subscription: true, // Adicionado
+        incidents: true, // Adicionado
+        guaranteeClaims: true, // Adicionado
+        coupon: true, // Adicionado
+        paymentIntent: true, // Adicionado
+    },
+});
+
+    await this.notifyClientStatusUpdate(updated, BookingStatus.ON_THE_WAY);
+    this.logger.log(`[BookingsService] onTheWayService: Booking ${bookingId} está a caminho.`);
+    return updated;
+  }
+
+  // NOVO: provider registra chegada (ON_THE_WAY -> ARRIVED)
+  async arriveAtLocation(bookingId: string, actorUserId: string): Promise<BookingWithDetailsRelations> {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: { client: { include: { user: true } }, provider: { include: { user: true } } },
+    });
+    if (!booking) throw new NotFoundException('Booking não encontrado.');
+    if (booking.provider.userId !== actorUserId) throw new ForbiddenException('Somente o prestador pode atualizar.');
+    if (booking.status !== BookingStatus.ON_THE_WAY) {
+      throw new BadRequestException(`Não é possível registrar a chegada: status atual é ${booking.status}.`);
+    }
+
+    const now = new Date();
+   // bloco de arriveAtLocation
+const updated = await this.prisma.booking.update({
+    where: { id: bookingId },
+    data: { status: BookingStatus.ARRIVED, arrivedAt: now },
+    include: {
+        client: { include: { user: true } },
+        provider: { include: { user: true } },
+        providerService: { include: { service: true } },
+        review: true,
+        address: true,
+        subscription: true, // Adicionado
+        incidents: true, // Adicionado
+        guaranteeClaims: true, // Adicionado
+        coupon: true, // Adicionado
+        paymentIntent: true, // Adicionado
+    },
+});
+
+    await this.notifyClientStatusUpdate(updated, BookingStatus.ARRIVED);
+    this.logger.log(`[BookingsService] arriveAtLocation: Booking ${bookingId} CHEGOU.`);
+    return updated;
+  }
+
   async startService(bookingId: string, providerUserId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
@@ -1566,8 +1654,8 @@ export class BookingsService {
     if (!booking) throw new NotFoundException('Agendamento não encontrado.');
     if (booking.provider.userId !== providerUserId)
       throw new ForbiddenException('Somente o prestador pode iniciar.');
-    if (booking.status !== BookingStatus.CONFIRMED)
-      throw new BadRequestException('Status inválido para iniciar.');
+    if (booking.status !== BookingStatus.ARRIVED)
+      throw new BadRequestException('Status inválido para iniciar. Deve ser ARRIVED.');
     if (booking.paymentIntent?.status !== 'PAID')
       throw new BadRequestException('Pagamento não confirmado.');
 
@@ -1584,11 +1672,11 @@ export class BookingsService {
       throw new BadRequestException('Fora da janela de início (±15min).');
     }
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: {
         startedAt: now,
-        status: BookingStatus.IN_PROGRESS,
+        status: BookingStatus.STARTED,
         startedByUserId: providerUserId,
       },
       include: {
@@ -1598,6 +1686,9 @@ export class BookingsService {
         paymentIntent: true,
       },
     });
+
+    await this.notifyClientStatusUpdate(updated, BookingStatus.STARTED);
+    return updated;
   }
 
   async completeService(bookingId: string, providerUserId: string) {
@@ -1608,8 +1699,8 @@ export class BookingsService {
     if (!booking) throw new NotFoundException('Agendamento não encontrado.');
     if (booking.provider.userId !== providerUserId)
       throw new ForbiddenException('Somente o prestador pode concluir.');
-    if (booking.status !== BookingStatus.IN_PROGRESS)
-      throw new BadRequestException('Status inválido para concluir.');
+    if (booking.status !== BookingStatus.STARTED)
+      throw new BadRequestException('Status inválido para concluir. Deve ser STARTED.');
     if (booking.paymentIntent?.status !== 'PAID')
       throw new BadRequestException('Pagamento não confirmado.');
 
@@ -1621,7 +1712,7 @@ export class BookingsService {
       where: { id: bookingId },
       data: {
         completedAt: new Date(),
-        status: BookingStatus.COMPLETED,
+        status: BookingStatus.FINISHED,
         completedByUserId: providerUserId,
       },
       include: {
@@ -1636,28 +1727,28 @@ export class BookingsService {
       if (updated.client?.userId) {
         await this.queuesService.addNotificationJob('send-notification', {
           userId: updated.client.userId,
-          kind: 'booking_completed',
-          title: 'Serviço concluído',
-          body: `Seu atendimento com ${updated.provider?.user?.fullName || 'prestador'} foi concluído.`,
+          kind: 'booking_finished',
+          title: 'Serviço finalizado',
+          body: `Seu atendimento com ${updated.provider?.user?.fullName || 'prestador'} foi finalizado.`,
           deeplink: `/(client)/bookings/${updated.id}`,
           priority: 1,
-          idempotencyKey: `notif:booking_completed:client:${updated.id}`,
+          idempotencyKey: `notif:booking_finished:client:${updated.id}`,
         });
       }
       if (updated.provider?.userId) {
         await this.queuesService.addNotificationJob('send-notification', {
           userId: updated.provider.userId,
-          kind: 'booking_completed',
-          title: 'Serviço concluído',
-          body: `Atendimento ${updated.id} marcado como concluído.`,
+          kind: 'booking_finished',
+          title: 'Serviço finalizado',
+          body: `Atendimento ${updated.id} marcado como finalizado.`,
           deeplink: `/(provider)/active-booking/${updated.id}`,
           priority: 1,
-          idempotencyKey: `notif:booking_completed:provider:${updated.id}`,
+          idempotencyKey: `notif:booking_finished:provider:${updated.id}`,
         });
       }
     } catch (e) {
       this.logger.warn(
-        `[BookingsService] Falha ao notificar conclusão do booking ${updated.id}: ${e?.message || e}`,
+        `[BookingsService] Falha ao notificar finalização do booking ${updated.id}: ${e?.message || e}`,
       );
     }
 
@@ -1665,13 +1756,13 @@ export class BookingsService {
   }
 
   /**
-   * Auto-completa agendamentos IN_PROGRESS cujo horário esperado já passou
+   * Auto-completa agendamentos STARTED cujo horário esperado já passou
    * e que estão pagos (PaymentIntent = PAID). Evita completar se reembolsado/chargeback.
    */
   async autoCompleteOverdueBookings() {
     const now = new Date();
     const inProgress = await this.prisma.booking.findMany({
-      where: { status: BookingStatus.IN_PROGRESS },
+      where: { status: BookingStatus.STARTED },
       include: { paymentIntent: true },
     });
 
@@ -1692,7 +1783,7 @@ export class BookingsService {
       const updated = await this.prisma.booking.update({
         where: { id: b.id },
         data: {
-          status: BookingStatus.COMPLETED,
+          status: BookingStatus.FINISHED,
           completedAt: expectedEnd ?? now,
         },
         include: {
@@ -1703,7 +1794,7 @@ export class BookingsService {
         },
       });
       this.logger.log(
-        `[BookingsService] autoCompleteOverdueBookings: booking ${b.id} marcado como COMPLETED automaticamente.`,
+        `[BookingsService] autoCompleteOverdueBookings: booking ${b.id} marcado como FINISHED automaticamente.`,
       );
 
       // Notificar cliente e prestador na conclusão automática
@@ -1711,28 +1802,28 @@ export class BookingsService {
         if ((updated as any).client?.userId) {
           await this.queuesService.addNotificationJob('send-notification', {
             userId: (updated as any).client.userId,
-            kind: 'booking_completed',
-            title: 'Serviço concluído',
-            body: `Seu atendimento com ${(updated as any).provider?.user?.fullName || 'prestador'} foi concluído.`,
+            kind: 'booking_finished',
+            title: 'Serviço finalizado',
+            body: `Seu atendimento com ${(updated as any).provider?.user?.fullName || 'prestador'} foi finalizado.`,
             deeplink: `/(client)/bookings/${updated.id}`,
             priority: 1,
-            idempotencyKey: `notif:booking_completed:client:${updated.id}`,
+            idempotencyKey: `notif:booking_finished:client:${updated.id}`,
           });
         }
         if ((updated as any).provider?.userId) {
           await this.queuesService.addNotificationJob('send-notification', {
             userId: (updated as any).provider.userId,
-            kind: 'booking_completed',
-            title: 'Serviço concluído',
-            body: `Atendimento ${updated.id} marcado como concluído.`,
+            kind: 'booking_finished',
+            title: 'Serviço finalizado',
+            body: `Atendimento ${updated.id} marcado como finalizado.`,
             deeplink: `/(provider)/active-booking/${updated.id}`,
             priority: 1,
-            idempotencyKey: `notif:booking_completed:provider:${updated.id}`,
+            idempotencyKey: `notif:booking_finished:provider:${updated.id}`,
           });
         }
       } catch (e) {
         this.logger.warn(
-          `[BookingsService] Falha ao notificar conclusão automática do booking ${updated.id}: ${e?.message || e}`,
+          `[BookingsService] Falha ao notificar finalização automática do booking ${updated.id}: ${e?.message || e}`,
         );
       }
     }
@@ -1741,7 +1832,7 @@ export class BookingsService {
   }
 
   /**
-   * Cron job (1/min) para auto-completar bookings IN_PROGRESS cujo horário final passou.
+   * Cron job (1/min) para auto-completar bookings STARTED cujo horário final passou.
    * Requer que ScheduleModule esteja importado no AppModule.
    */
   @Cron(CronExpression.EVERY_MINUTE)
@@ -1936,7 +2027,7 @@ export class BookingsService {
       );
     }
 
-    const finalStatus = newStatus || BookingStatus.COMPLETED;
+    const finalStatus = newStatus || BookingStatus.FINISHED;
     const updatedBooking = await this.prisma.booking.update({
       where: { id: bookingId },
       data: {
@@ -1958,7 +2049,7 @@ export class BookingsService {
 
     // Criar entradas no Ledger quando completar (idempotente por bookingId)
     if (
-      finalStatus === BookingStatus.COMPLETED &&
+      finalStatus === BookingStatus.FINISHED &&
       updatedBooking.provider?.userId
     ) {
       const existingEarning = await this.prisma.ledgerEntry.findFirst({
@@ -1971,7 +2062,7 @@ export class BookingsService {
             bookingId: updatedBooking.id,
             amount: new Prisma.Decimal(updatedBooking.totalPrice.toNumber()),
             type: LedgerEntryType.EARNING,
-            note: `Earning for completed booking ${updatedBooking.id}`,
+            note: `Earning for finished booking ${updatedBooking.id}`,
           },
         });
         this.logger.log(
@@ -2037,3 +2128,4 @@ export class BookingsService {
     return updatedBooking;
   }
 }
+// ...existing code...
