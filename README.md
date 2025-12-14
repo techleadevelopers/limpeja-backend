@@ -1,286 +1,67 @@
 <div style="background-color: #f8f9fa; padding: 30px; border-radius: 12px; border: 1px solid #dee2e6;">
 
-<div style="text-align: center; margin-bottom: 40px;">
-    <img src="https://drive.google.com/uc?id=1PkFFe5bAEVf-x-nPD3BMO21gptKfFosu" alt="LimpeJá-App Logo" width="100" style="margin-top: 3px; border-radius: 15px;">
- NestJS · Prisma · PostgreSQL · Redis · PIX · WebSockets
+<div style="text-align: center; margin-bottom: 40px;">     <img src="https://drive.google.com/uc?id=1PkFFe5bAEVf-x-nPD3BMO21gptKfFosu" alt="LimpeJá-App Logo" width="100" style="margin-top: 3px; border-radius: 15px;">     <h1 style="color: #212529; font-size: 32px; margin-top: 15px; margin-bottom: 5px; font-weight: 700;">         LimpeJá — Backend Core System     </h1>     <p style="color: #495057; font-size: 18px; font-weight: 400; margin-top: 0;">         <span style="font-weight: 600; color: #007bff;">NestJS</span> · <span style="font-weight: 600; color: #007bff;">Prisma</span> · <span style="font-weight: 600; color: #007bff;">PostgreSQL</span> · <span style="font-weight: 600; color: #007bff;">Redis</span> · <span style="font-weight: 600; color: #007bff;">PIX</span> · <span style="font-weight: 600; color: #007bff;">WebSockets</span>     </p>     <div style="color: #6c757d; font-size: 16px; border-top: 2px solid #e9ecef; padding-top: 15px; margin-top: 15px;">         Backend de nível enterprise para marketplace de serviços de limpeza, projetado para escala, segurança financeira, observabilidade e evolução contínua.     </div> </div>
 
-Backend de nível enterprise para marketplace de serviços de limpeza, projetado para escala, segurança financeira, observabilidade e evolução contínua.
-        Backend de nível enterprise para marketplace de serviços, projetado para escala, segurança financeira observabilidade e evolução contínua.
-  🚀 Visão Geral
+<div style="margin-bottom: 40px;">     <h2 style="color: #212529; border-left: 4px solid #007bff; padding-left: 10px; margin-bottom: 20px; font-size: 24px;">         🚀 Visão Geral: O Núcleo Transacional     </h2>     <p style="color: #495057; line-height: 1.6;">         O LimpeJá Backend é o núcleo transacional e operacional da plataforma. Ele conecta clientes, prestadores verificados e administradores, orquestrando fluxos complexos e críticos:     </p>     <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-top: 20px;">         <span style="background-color: #e9ecef; color: #343a40; padding: 8px 15px; border-radius: 20px; font-weight: 500;">Agendamentos complexos</span>         <span style="background-color: #e9ecef; color: #343a40; padding: 8px 15px; border-radius: 20px; font-weight: 500;">Pagamentos PIX (Ledger Contábil)</span>         <span style="background-color: #e9ecef; color: #343a40; padding: 8px 15px; border-radius: 20px; font-weight: 500;">Verificação de identidade (OCR + selfie)</span>         <span style="background-color: #e9ecef; color: #343a40; padding: 8px 15px; border-radius: 20px; font-weight: 500;">Chat seguro em tempo real</span>         <span style="background-color: #e9ecef; color: #343a40; padding: 8px 15px; border-radius: 20px; font-weight: 500;">Saques e conciliação financeira</span>     </div>     <p style="color: #495057; line-height: 1.6; margin-top: 20px; border-left: 3px solid #dc3545; padding-left: 10px;">         Tudo foi construído com foco em consistência financeira, idempotência, auditoria e resiliência.     </p> </div>
 
-O LimpeJá Backend é o núcleo transacional e operacional da plataforma LimpeJá. Ele conecta clientes, prestadores verificados e administradores, orquestrando:
+<div style="margin-bottom: 40px;">     <h2 style="color: #212529; border-left: 4px solid #007bff; padding-left: 10px; margin-bottom: 20px; font-size: 24px;">         🧩 Arquitetura do Sistema     </h2> <h3 style="color: #343a40; font-size: 20px; margin-top: 10px;">Stack Principal</h3>     <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-bottom: 30px;"> <ul style="list-style: none; padding: 0; margin: 0; flex-basis: 48%;"> <li style="color: #343a40; margin-bottom: 5px;">NestJS — Arquitetura modular, DI, Guards, Pipes.</li> <li style="color: #343a40; margin-bottom: 5px;">Prisma ORM — Tipagem forte + migrações seguras.</li> <li style="color: #343a40; margin-bottom: 5px;">PostgreSQL — Dados transacionais e financeiros.</li> <li style="color: #343a40; margin-bottom: 5px;">Redis — Cache, filas e rate-limit.</li> <li style="color: #343a40; margin-bottom: 5px;">Bull Queues — Processamento assíncrono.</li> </ul> <ul style="list-style: none; padding: 0; margin: 0; flex-basis: 48%;"> <li style="color: #343a40; margin-bottom: 5px;">WebSockets — Chat e eventos em tempo real.</li> <li style="color: #343a40; margin-bottom: 5px;">JWT Auth — API e WS.</li> <li style="color: #343a40; margin-bottom: 5px;">Swagger / OpenAPI — Documentação viva.</li> <li style="color: #343a40; margin-bottom: 5px;">Sentry — Tracing, erros e performance.</li> <li style="color: #343a40; margin-bottom: 5px;">PostGIS — Geolocalização avançada.</li> </ul> </div>
 
-Agendamentos complexos
+    <div style="text-align: center; margin-bottom: 30px; border: 1px solid #ced4da; padding: 10px; border-radius: 8px;">         <img src="https://drive.google.com/uc?id=1dFSaBKW6AIs1_DLeOAsUfv5Zl5BkPdI_" alt="Diagrama de Arquitetura do Backend LimpeJá" style="width: 100%; max-width: 800px; border-radius: 8px;"> <p style="text-align: center; color: #6c757d; font-size: 14px; margin-top: 10px;">             📌 Diagrama completo: <a href="/docs/architecture.png" style="color: #007bff; text-decoration: none;">/docs/architecture.png</a>         </p>     </div>
 
-Pagamentos PIX com retenção e liberação (ledger contábil)
+</div>
 
-Saques e conciliação financeira
+<div style="margin-bottom: 40px;">     <h2 style="color: #212529; border-left: 4px solid #007bff; padding-left: 10px; margin-bottom: 20px; font-size: 24px;">         🏗️ Organização por Domínio     </h2>     <p style="color: #495057; line-height: 1.6;">         O backend segue uma abordagem DDD-lite, com módulos independentes e responsabilidades claras:     </p>
 
-Chat seguro em tempo real
+    <div style="display: flex; flex-wrap: wrap; margin-top: 15px; justify-content: space-between;"> <div style="flex-basis: 32%; background-color: #f0f5ff; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #adc6ff;">             <h4 style="color: #1d39c4; margin-top: 0; margin-bottom: 10px;">Núcleo</h4>             <ul style="list-style: disc; padding-left: 20px; color: #343a40; font-size: 14px;">                 <li>Auth, Users, Clients, Providers</li>                 <li>Roles & Permissions</li>             </ul>         </div>
 
-Disputas, reembolsos e garantias
+        <div style="flex-basis: 32%; background-color: #fffbe6; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #ffe58f;">             <h4 style="color: #faad14; margin-top: 0; margin-bottom: 10px;">Operacional</h4>             <ul style="list-style: disc; padding-left: 20px; color: #343a40; font-size: 14px;">                 <li>Services (catálogo), Provider Services</li>                 <li>Availability, Bookings</li>                 <li>Pricing, Offers & Coupons</li>             </ul>         </div>
 
-Verificação de identidade (OCR + selfie)
+        <div style="flex-basis: 32%; background-color: #e6f7ff; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #91d5ff;">             <h4 style="color: #096dd9; margin-top: 0; margin-bottom: 10px;">Financeiro (Alta Criticidade)</h4>             <ul style="list-style: disc; padding-left: 20px; color: #343a40; font-size: 14px;">                 <li>Payments (PIX)</li>                 <li>Earnings (Ledger)</li>                 <li>Withdrawals, Refunds, Guarantees</li>             </ul>         </div>
 
-Programas de fidelidade, missões e ranking
+    <div style="flex-basis: 48%; background-color: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #66bb6a;">
+            <h4 style="color: #388e3c; margin-top: 0; margin-bottom: 10px;">Experiência & Engajamento</h4>             <ul style="list-style: disc; padding-left: 20px; color: #343a40; font-size: 14px;">                 <li>Chat (WebSocket), Notifications</li>                 <li>Reviews, Ranking, Loyalty, Missions, Referrals</li>             </ul>         </div>
 
-Tudo foi construído com foco em consistência financeira, idempotência, auditoria e resiliência.
+    <div style="flex-basis: 48%; background-color: #fbe6e6; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 3px solid #ff9999;">
+            <h4 style="color: #cc3333; margin-top: 0; margin-bottom: 10px;">Segurança & Compliance</h4>             <ul style="list-style: disc; padding-left: 20px; color: #343a40; font-size: 14px;">                 <li>Verification (OCR / Selfie), Safety (incidentes)</li>                 <li>Disputes, Subscriptions</li>             </ul>         </div>
 
-🧩 Arquitetura do Sistema
-Stack Principal
+    </div>         <p style="color: #495057; text-align: right; margin-top: 20px;">         📚 Documentação detalhada por módulo: <a href="/docs/modules/*.md" style="color: #007bff; text-decoration: none;">➡️ /docs/modules/*.md</a>     </p>
 
-NestJS — Arquitetura modular, DI, Guards, Pipes
+</div>
 
-Prisma ORM — Tipagem forte + migrações seguras
+<div style="margin-bottom: 40px;">     <h2 style="color: #212529; border-left: 4px solid #007bff; padding-left: 10px; margin-bottom: 20px; font-size: 24px;">         🔄 Fluxos Críticos (Ledger Financeiro)     </h2>         <div style="background-color: #fff; padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e9ecef;">         <h3 style="color: #343a40; font-size: 18px; margin-top: 0;"><span style="color: #007bff; font-weight: 600;">1️⃣ Agendamento + Pagamento PIX</span></h3>         <ul style="list-style: disc; padding-left: 20px; color: #495057; font-size: 14px;"> <li>Cliente escolhe provedor; Pricing aplica regras.</li> <li>Booking criado, PIX gerado (Orders / QR Code).</li> <li>Webhook confirma pagamento. Booking → CONFIRMED.</li> </ul>         <div style="background-color: #f0f3f6; padding: 10px; border-left: 3px solid #28a745; font-family: monospace; font-size: 14px; color: #343a40; margin-top: 10px;"> Ledger:
 
-PostgreSQL — Dados transacionais e financeiros
 
-Redis — Cache, filas e rate-limit
+            <span style="color: #28a745;">✅ HOLD (valor bruto)</span> — Dinheiro retido.
 
-Bull Queues — Processamento assíncrono
 
-WebSockets — Chat e eventos em tempo real
+            <span style="color: #dc3545;">❌ FEE (comissão)</span> — Débito imediato da taxa.         </div>     </div>
 
-JWT Auth — API e WS
+    <div style="background-color: #fff; padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e9ecef;">         <h3 style="color: #343a40; font-size: 18px; margin-top: 0;"><span style="color: #007bff; font-weight: 600;">2️⃣ Conclusão do Serviço</span></h3>         <ul style="list-style: disc; padding-left: 20px; color: #495057; font-size: 14px;"> <li>Prestador conclui serviço. Booking → FINISHED.</li> <li>Valor disponível para saque.</li> </ul>         <div style="background-color: #f0f3f6; padding: 10px; border-left: 3px solid #ffc107; font-family: monospace; font-size: 14px; color: #343a40; margin-top: 10px;"> Ledger:
 
-Swagger / OpenAPI — Documentação viva
 
-Sentry — Tracing, erros e performance
+            <span style="color: #28a745;">✅ EARNING (valor líquido)</span> — Disponível para saque.
 
-📌 Diagrama completo:
-        <img src="https://drive.google.com/uc?id=1dFSaBKW6AIs1_DLeOAsUfv5Zl5BkPdI_" alt="Diagrama de Arquitetura do Backend LimpeJá" style="width: 100%; max-width: 800px; border-radius: 8px;">
-    </div>
-    🏗️ Organização por Domínio
 
-O backend segue uma abordagem DDD-lite, com módulos independentes e responsabilidades claras.
+            <span style="color: #dc3545;">❌ HOLD negativo</span> — Débito para liberar o crédito inicial.         </div>     </div>
 
-Núcleo
+<div style="background-color: #fff; padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #e9ecef;">
+        <h3 style="color: #343a40; font-size: 18px; margin-top: 0;"><span style="color: #007bff; font-weight: 600;">3️⃣ Saques e 4️⃣ Disputas</span></h3>         <ul style="list-style: disc; padding-left: 20px; color: #495057; font-size: 14px;"> <li>Saques: Solicitação com idempotency-key → Aprovação (admin) → Webhook confirma payout → Ledger WITHDRAWAL (valor negativo).</li> <li>Disputas: Cliente/prestador abre disputa → Booking → PENDING_DISPUTE → Admin resolve (liberação / reembolso) → Tudo registrado no Ledger.</li> </ul>     </div>
 
-Auth
+<div style="color: #6c757d; font-size: 14px; margin-top: 10px; border-left: 3px solid #007bff; padding-left: 10px; background-color: #e9f5fe; padding-top: 5px; padding-bottom: 5px; border-radius: 4px;">
+    💡 **Modelo de Auditoria:** Garante **auditoria completa**, **nenhum dinheiro “invisível”** e **reconciliação simples**.
+</div>
+</div>
 
-Users
+<div style="margin-bottom: 40px;">     <h2 style="color: #212529; border-left: 4px solid #007bff; padding-left: 10px; margin-bottom: 20px; font-size: 24px;">         ⚙️ Infraestrutura, Segurança e Escalabilidade     </h2>
 
-Clients
+    <div style="display: flex; justify-content: space-between; gap: 20px;">         <div style="flex: 1; padding: 15px; border: 1px solid #ced4da; border-radius: 8px;">             <h3 style="color: #dc3545; font-size: 18px; margin-top: 0;">🛡️ Segurança</h3>             <ul style="list-style: none; padding: 0; margin: 0; color: #495057; font-size: 14px;">                 <li style="margin-bottom: 5px;">Guards por Papel: (CLIENT, PROVIDER, ADMIN).</li>                 <li style="margin-bottom: 5px;">Auditoria Financeira: Todas as transações no Ledger.</li>                 <li style="margin-bottom: 5px;">PII Masking: Logs e dados sensíveis mascarados.</li>                 <li style="margin-bottom: 5px;">Antifraude PIX e Webhooks com verificação de assinatura.</li>             </ul>         </div>                 <div style="flex: 1; padding: 15px; border: 1px solid #ced4da; border-radius: 8px;">             <h3 style="color: #ffc107; font-size: 18px; margin-top: 0;">📈 Escalabilidade</h3>             <ul style="list-style: none; padding: 0; margin: 0; color: #495057; font-size: 14px;">                 <li style="margin-bottom: 5px;">Separação API / Workers: Desacoplamento I/O e CPU.</li>                 <li style="margin-bottom: 5px;">Idempotência em Webhooks, Jobs e Saques.</li>                 <li style="margin-bottom: 5px;">Módulos Independentes (DDD-lite).</li>                 <li style="margin-bottom: 5px;">PostgreSQL com índices otimizados (PostGIS).</li>             </ul>         </div>
 
-Providers
+        <div style="flex: 1; padding: 15px; border: 1px solid #ced4da; border-radius: 8px;">             <h3 style="color: #28a745; font-size: 18px; margin-top: 0;">🧠 Observabilidade</h3>             <ul style="list-style: none; padding: 0; margin: 0; color: #495057; font-size: 14px;">                 <li style="margin-bottom: 5px;">Sentry Tracing em todas as requests.</li>                 <li style="margin-bottom: 5px;">Logs Estruturados (fácil agregação).</li>                 <li style="margin-bottom: 5px;">Health Checks para orquestradores (K8s/Cloud Run).</li>                 <li style="margin-bottom: 5px;">Métricas de Filas (Bull-board pronta para conectar).</li>             </ul>         </div>     </div>
 
-Roles & Permissions
+</div>
 
-Operacional
+<div style="margin-bottom: 40px;">     <h2 style="color: #212529; border-left: 4px solid #007bff; padding-left: 10px; margin-bottom: 20px; font-size: 24px;">         📂 Estrutura do Projeto     </h2>     <div style="background-color: #f1f3f5; padding: 15px; border-radius: 8px; font-family: monospace; overflow: auto; color: #343a40; font-size: 14px;">         <pre style="margin: 0; padding: 0;"> src/   ├── auth/            # (Núcleo)   ├── users/   ├── providers/   ├── bookings/        # (Operacional)   ├── payments/        # (Financeiro)   ├── earnings/        # (Financeiro)   ├── withdrawals/     # (Financeiro)   ├── chat/            # (Experiência)   ├── notifications/   ├── queues/          # Workers (Bull/Redis)   ├── common/   ├── shared/   └── prisma/ docs/   ├── architecture.png   └── modules/         # Documentação de Domínio </pre>     </div> </div>
 
-Services (catálogo)
+<div style="display: flex; justify-content: space-between; align-items: flex-start; border-top: 1px solid #e9ecef; padding-top: 20px;">     <div style="flex-basis: 48%;">         <h3 style="color: #212529; margin-top: 0; margin-bottom: 10px; font-size: 20px;">             🔍 Documentação da API         </h3>         <a href="/api/docs" style="display: inline-block; background-color: #007bff; color: white; padding: 8px 15px; border-radius: 6px; text-decoration: none; font-weight: 600;">             Swagger: /api/docs         </a> <h3 style="color: #212529; margin-top: 15px; margin-bottom: 10px; font-size: 20px;"> 📜 Licença </h3> <p style="color: #6c757d; font-size: 14px; margin: 0;">             MIT         </p>     </div>         <div style="flex-basis: 48%; text-align: right;">         <h3 style="color: #212529; margin-top: 0; margin-bottom: 10px; font-size: 20px;">             🏁 Status do Projeto         </h3>         <p style="color: #28a745; font-weight: 700; font-size: 16px; margin-bottom: 5px;">             ✅ Produção-ready         </p> <ul style="list-style: none; padding: 0; margin: 0; color: #6c757d; font-size: 14px;"> <li>✅ Arquitetura auditável</li> <li>✅ Financeiro consistente</li> <li>✅ Escalável e observável</li> </ul>     </div> </div>
 
-Provider Services
-
-Availability
-
-Bookings
-
-Pricing
-
-Offers & Coupons
-
-Financeiro (Alta criticidade)
-
-Payments (PIX)
-
-Earnings (Ledger)
-
-Withdrawals
-
-Refunds
-
-Guarantees
-
-Experiência & Engajamento
-
-Chat (WebSocket)
-
-Notifications
-
-Reviews
-
-Ranking
-
-Loyalty
-
-Missions
-
-Referrals
-
-Segurança & Compliance
-
-Verification (OCR + Selfie)
-
-Safety (incidentes / pânico)
-
-Disputes
-
-Subscriptions
-
-📚 Documentação detalhada por módulo: ➡️ /docs/modules/*.md
-
-🔄 Fluxos Críticos
-1️⃣ Agendamento + Pagamento PIX
-
-Cliente escolhe provedor
-
-Pricing aplica regras dinâmicas e cupons
-
-Booking criado
-
-PIX gerado (Orders / QR Code)
-
-Webhook confirma pagamento
-
-Booking → CONFIRMED
-
-Ledger:
-
-HOLD (valor bruto)
-
-FEE (comissão)
-
-2️⃣ Conclusão do Serviço
-
-Prestador conclui serviço
-
-Booking → FINISHED
-
-Ledger:
-
-EARNING (valor líquido)
-
-HOLD negativo (liberação)
-
-Valor disponível para saque
-
-💡 Modelo garante:
-
-Auditoria completa
-
-Nenhum dinheiro “invisível”
-
-Reconciliação simples
-
-3️⃣ Saques (Withdrawals)
-
-Solicitação com idempotency-key
-
-Aprovação manual (admin)
-
-Webhook confirma payout
-
-Ledger WITHDRAWAL (valor negativo)
-
-4️⃣ Disputas e Reembolsos
-
-Cliente ou prestador abre disputa
-
-Booking → PENDING_DISPUTE
-
-Admin resolve:
-
-Liberação
-
-Reembolso parcial ou total
-
-Tudo registrado no ledger.
-
-⚙️ Infraestrutura
-
-PostgreSQL com índices otimizados (geolocalização, disponibilidade, ranking)
-
-Redis como:
-
-Broker de filas
-
-Cache com TTL estratégico
-
-Rate limiting
-
-Workers separados da API
-
-Prisma com pooling
-
-🛡️ Segurança
-
-JWT (API + WebSocket)
-
-Guards por papel (CLIENT, PROVIDER, ADMIN)
-
-Sanitização de PII
-
-Logs mascarados
-
-Auditoria financeira completa
-
-Antifraude no fluxo PIX
-
-Webhooks com verificação de assinatura
-
-📈 Escalabilidade
-
-Separação clara API / Workers
-
-Processamento assíncrono
-
-Módulos independentes
-
-Idempotência em:
-
-Webhooks
-
-Jobs
-
-Saques
-
-🧠 Observabilidade
-
-Sentry tracing em todas as requests
-
-Logs estruturados
-
-Health checks
-
-Métricas de filas (Bull-board pronta)
-
-📂 Estrutura do Projeto
-src/
-  auth/
-  users/
-  providers/
-  bookings/
-  payments/
-  earnings/
-  withdrawals/
-  chat/
-  notifications/
-  queues/
-  common/
-  shared/
-  prisma/
-docs/
-  architecture.png
-  modules/
-    bookings.md
-    payments.md
-    earnings.md
-    verification.md
-🔍 Documentação da API
-
-Swagger:
-
-/api/docs
-📜 Licença
-
-MIT
-
-🏁 Status do Projeto
-
-✅ Produção-ready
-✅ Arquitetura auditável
-✅ Financeiro consistente
-✅ Escalável e observável
-
-Este backend foi projetado para passar due diligence técnica, auditoria financeira e crescer sem retrabalho.
+<div style="text-align: center; color: #495057; font-size: 16px; margin-top: 25px; padding-top: 15px; border-top: 2px dashed #e9ecef;"> Este backend foi projetado para passar due diligence técnica, auditoria financeira e crescer sem retrabalho. </div>
