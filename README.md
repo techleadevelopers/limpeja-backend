@@ -8,8 +8,8 @@
     <p style="color: #495057; font-size: 18px; font-weight: 400; margin-top: 0;">
         <span style="font-weight: 600; color: #007bff;">NestJS</span> · <span style="font-weight: 600; color: #007bff;">Prisma</span> · <span style="font-weight: 600; color: #007bff;">PostgreSQL</span> · <span style="font-weight: 600; color: #007bff;">Redis</span> · <span style="font-weight: 600; color: #007bff;">PIX</span>
     </p>
-    <div style="color: #6c757d; font-size: 16px; border-top: 2px solid #e9ecef; padding-top: 15px; margin-top: 15px;">
-        Backend de nível enterprise para marketplace de serviços, projetado para escala, segurança financeira, observabilidade e evolução contínua.
+    <div style="color: #6c757d; font-size: 16px; border-top: 2px solid #e9ecef; padding-top: 10px; margin-top: 5px;">
+        Backend de nível enterprise para marketplace de serviços, projetado para escala, segurança financeira observabilidade e evolução contínua.
     </div>
 </div>
 
@@ -194,9 +194,9 @@ docs/
     </div>
 </div>
 
-<div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e9ecef; padding-top: 20px;">
+<div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e9ecef; padding-top: 10px;">
     <div>
-        <h3 style="color: #212529; margin-top: 0; margin-bottom: 10px; font-size: 20px;">
+        <h3 style="color: #212529; margin-top: 0; margin-bottom: 2px; font-size: 20px;">
             🔍 Documentação da API
         </h3>
         <a href="/api/docs" style="display: inline-block; background-color: #007bff; color: white; padding: 8px 15px; border-radius: 6px; text-decoration: none; font-weight: 600;">
