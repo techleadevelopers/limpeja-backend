@@ -28,4 +28,4 @@ ENV PORT=5000
 EXPOSE 5000
 
 # Comando correto para iniciar a aplicação
-CMD ["dumb-init","node","dist/main.js"]
+CMD ["dumb-init","node","dist/src/main.js"]
