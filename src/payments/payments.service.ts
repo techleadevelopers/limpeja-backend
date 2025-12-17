@@ -168,6 +168,18 @@ export class PaymentsService {
     const status = payload?.transaction?.status
       ? String(payload.transaction.status).toUpperCase()
       : '';
+    const failedStatuses = [
+      'FAILED',
+      'CANCELED',
+      'CANCELLED',
+      'DECLINED',
+      'DENIED',
+      'REFUSED',
+      'EXPIRED',
+      'TIMEOUT',
+    ];
+    let shouldNotifyPaymentConfirmed = false;
+    let bookingForNotification: any = null;
 
     if (
       payload.event === 'charge.paid' ||
@@ -192,9 +204,8 @@ export class PaymentsService {
           include: {
             booking: {
               include: {
-                provider: {
-                  select: { userId: true },
-                },
+                provider: { include: { user: true } },
+                client: { include: { user: true } },
               },
             },
           },
@@ -275,10 +286,87 @@ export class PaymentsService {
             this.logger.log(`[PaymentsService] Entradas de ledger criadas para o booking ${booking.id}.`);
             // --- FIM DA IMPLEMENTAÇÃO SEGURA (IDEMPOTENTE) DO LEDGER ---
           });
+          shouldNotifyPaymentConfirmed = true;
+          bookingForNotification = intent.booking;
         } else if (!intent) {
           this.logger.warn(
             `[PaymentsService] Webhook para ref ${externalRef} recebido, mas PaymentIntent não encontrado.`,
           );
+        }
+      }
+    }
+
+    // Dispara push físico após confirmação de pagamento (cliente e prestador)
+    if (shouldNotifyPaymentConfirmed && bookingForNotification) {
+      const b = bookingForNotification;
+      const hhmm = String(b.scheduledTime || '').split(':');
+      const hora = `${String(parseInt(hhmm[0] || '0', 10)).padStart(2, '0')}:${String(parseInt(hhmm[1] || '0', 10)).padStart(2, '0')}`;
+      const providerName = b.provider?.user?.fullName || 'Prestador';
+      const clientName = b.client?.user?.fullName || 'Cliente';
+      if (b.client?.userId) {
+        await this.queues.addNotificationJob('send-notification', {
+          userId: b.client.userId,
+          kind: 'payment_confirmed',
+          title: 'Pagamento confirmado',
+          body: `Seu serviço com ${providerName} está confirmado para ${hora}.`,
+          deeplink: `/agendamento/${b.id}`,
+          priority: 1,
+          idempotencyKey: `notif:payment_confirmed:client:${b.id}`,
+        });
+      }
+      if (b.provider?.userId) {
+        await this.queues.addNotificationJob('send-notification', {
+          userId: b.provider.userId,
+          kind: 'payment_confirmed',
+          title: 'Novo atendimento confirmado',
+          body: `${clientName || 'Cliente'} confirmou pagamento para ${hora}.`,
+          deeplink: `/agendamento/${b.id}`,
+          priority: 1,
+          idempotencyKey: `notif:payment_confirmed:provider:${b.id}`,
+        });
+      }
+    }
+
+    // Falha de pagamento: marca intent como FAILED e notifica cliente
+    if (failedStatuses.includes(status)) {
+      const externalRef =
+        payload?.data?.id || payload?.resource_id || payload?.transaction?.id;
+      const intent = await this.prisma.paymentIntent.findFirst({
+        where: { externalRef },
+        include: {
+          booking: {
+            include: {
+              client: { include: { user: true } },
+            },
+          },
+        },
+      });
+      if (intent) {
+        if (intent.status !== PaymentIntentStatus.EXPIRED) {
+          await this.prisma.paymentIntent.update({
+            where: { id: intent.id },
+            data: { status: PaymentIntentStatus.EXPIRED },
+          });
+          if (intent.bookingId) {
+            await this.prisma.booking.update({
+              where: { id: intent.bookingId },
+              data: { status: BookingStatus.PENDING },
+            });
+          }
+        }
+        const b = intent.booking;
+        if (b?.client?.userId) {
+          const hhmm = String(b.scheduledTime || '').split(':');
+          const hora = `${String(parseInt(hhmm[0] || '0', 10)).padStart(2, '0')}:${String(parseInt(hhmm[1] || '0', 10)).padStart(2, '0')}`;
+          await this.queues.addNotificationJob('send-notification', {
+            userId: b.client.userId,
+            kind: 'payment_failed',
+            title: 'Pagamento não aprovado',
+            body: `O pagamento do atendimento ${b.id} falhou. Refaça o pagamento para manter o agendamento às ${hora}.`,
+            deeplink: `/agendamento/${b.id}`,
+            priority: 1,
+            idempotencyKey: `notif:payment_failed:client:${b.id}`,
+          });
         }
       }
     }
