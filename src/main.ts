@@ -11,6 +11,9 @@ import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import * as process from 'process';
 import { I18nService } from './common/i18n/i18n.service';
+import { initPrometheus } from './metrics/prometheus';
+import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
+import { initTracing } from './tracing/otel';
 
 async function bootstrap() {
   console.time('AppStartupTotal');
@@ -21,6 +24,20 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
   const i18nService = app.get(I18nService);
+
+  // =======================================================
+  //                   PROMETHEUS METRICS
+  // =======================================================
+  initPrometheus();
+
+  // =======================================================
+  //                 OPEN TELEMETRY TRACING
+  // =======================================================
+  initTracing({
+    serviceName: configService.get<string>('OTEL_SERVICE_NAME') || 'backend-cleaning',
+    otlpEndpoint: configService.get<string>('OTEL_EXPORTER_OTLP_ENDPOINT'),
+    debug: configService.get<string>('OTEL_DEBUG') === '1',
+  });
 
   const sentryDsn = configService.get<string>('SENTRY_DSN');
   const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
@@ -133,6 +150,11 @@ async function bootstrap() {
   //                EXCEPTION FILTER GLOBAL
   // =======================================================
   app.useGlobalFilters(new AllExceptionsFilter(i18nService));
+
+  // =======================================================
+  //                  TRACING INTERCEPTOR
+  // =======================================================
+  app.useGlobalInterceptors(app.get(TracingInterceptor));
 
   // =======================================================
   //                    FIREBASE ADMIN
