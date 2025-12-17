@@ -32,7 +32,13 @@ import { SettingsService } from '../settings/settings.service';
 export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
   include: {
     user: {
-      select: { email: true; role: true; isVerified: true; fullName: true };
+      select: {
+        email: true;
+        role: true;
+        isVerified: true;
+        fullName: true;
+        phone: true;
+      };
     };
     address: true;
     providerServices: { include: { service: true } };
@@ -134,6 +140,7 @@ export type ProviderWithCalculatedRating = {
     role: UserRole;
     isVerified: boolean;
     fullName: string;
+    phone?: string | null;
   };
   acceptanceRate?: number; // NOVO: Para métricas mini
   averageResponseTime?: number; // NOVO: Para métricas mini
@@ -365,7 +372,7 @@ export class ProvidersService {
       fullName: provider.fullName,
       email: provider.user?.email || '',
       avatarUrl: provider.avatarUrl || null,
-      phone: provider.phone || null,
+      phone: provider.phone || provider.user?.phone || null,
       bio: provider.bio || null,
       verificationStatus: provider.verificationStatus, // NOVO: Incluído para selo
       address: provider.address ?? null,
@@ -416,6 +423,7 @@ export class ProvidersService {
         role: provider.user.role,
         isVerified: provider.user.isVerified,
         fullName: provider.user.fullName,
+        phone: provider.user.phone,
       },
       acceptanceRate: provider.acceptanceRate || 0, // NOVO: Default 0 para métricas
       averageResponseTime: provider.averageResponseTime || 0, // NOVO: Default 0 para métricas
@@ -500,7 +508,13 @@ export class ProvidersService {
       },
       include: {
         user: {
-          select: { email: true, role: true, isVerified: true, fullName: true },
+          select: {
+            email: true,
+            role: true,
+            isVerified: true,
+            fullName: true,
+            phone: true,
+          },
         },
         address: true,
         providerServices: { include: { service: true } },
@@ -551,7 +565,13 @@ export class ProvidersService {
       where: { id },
       include: {
         user: {
-          select: { email: true, role: true, isVerified: true, fullName: true },
+          select: {
+            email: true,
+            role: true,
+            isVerified: true,
+            fullName: true,
+            phone: true,
+          },
         },
         address: true,
         providerServices: { include: { service: true } },
@@ -611,7 +631,13 @@ export class ProvidersService {
       where: { userId },
       include: {
         user: {
-          select: { email: true, role: true, isVerified: true, fullName: true },
+          select: {
+            email: true,
+            role: true,
+            isVerified: true,
+            fullName: true,
+            phone: true,
+          },
         },
         address: true,
         providerServices: { include: { service: true } },
@@ -705,7 +731,13 @@ export class ProvidersService {
       data: updateData,
       include: {
         user: {
-          select: { email: true, role: true, isVerified: true, fullName: true },
+          select: {
+            email: true,
+            role: true,
+            isVerified: true,
+            fullName: true,
+            phone: true,
+          },
         },
         address: true,
         providerServices: { include: { service: true } },
@@ -820,7 +852,13 @@ export class ProvidersService {
       data: updateData,
       include: {
         user: {
-          select: { email: true, role: true, isVerified: true, fullName: true },
+          select: {
+            email: true,
+            role: true,
+            isVerified: true,
+            fullName: true,
+            phone: true,
+          },
         },
         address: true,
         providerServices: { include: { service: true } },
@@ -1072,6 +1110,7 @@ export class ProvidersService {
               u.role,
               u."isVerified",
               u."fullName" AS user_fullName,
+              u."phone" AS user_phone,
               a.id AS "addressId",
               a.cep,
               a.street,
@@ -1158,7 +1197,7 @@ export class ProvidersService {
                 ${serviceId ? Prisma.sql`AND ps."serviceId" = ${serviceId}` : Prisma.empty}
                 ${location ? Prisma.sql`AND (a.city ILIKE ${'%' + location + '%'} OR a.state ILIKE ${'%' + location + '%'} OR a.street ILIKE ${'%' + location + '%'} OR a.neighborhood ILIKE ${'%' + location + '%'})` : Prisma.empty}
             GROUP BY
-                p.id, u.email, u.role, u."isVerified", u."fullName", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus", p."pixKeyMasked"
+                p.id, u.email, u.role, u."isVerified", u."fullName", u."phone", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus", p."pixKeyMasked"
             ORDER BY
                 distance_m ASC  -- CORREÇÃO: Ordena por distance_m
             LIMIT ${limit || 10} OFFSET ${offset || 0};
@@ -1178,7 +1217,7 @@ export class ProvidersService {
               fullName: rp.fullName,
               cpf: rp.cpf,
               dateOfBirth: rp.dateOfBirth,
-              phone: rp.phone,
+              phone: rp.phone || rp.user_phone || null,
               yearsOfExperience: rp.yearsOfExperience,
               avatarUrl: rp.avatarUrl,
               bio: rp.bio,
@@ -1204,6 +1243,7 @@ export class ProvidersService {
                 role: rp.role,
                 isVerified: rp.isVerified,
                 fullName: rp.user_fullName,
+                phone: rp.user_phone,
               },
               address: rp.addressId
                 ? ({
@@ -1324,7 +1364,13 @@ export class ProvidersService {
       orderBy: orderBy,
       include: {
         user: {
-          select: { email: true, role: true, isVerified: true, fullName: true },
+          select: {
+            email: true,
+            role: true,
+            isVerified: true,
+            fullName: true,
+            phone: true,
+          },
         },
         address: true,
         providerServices: { include: { service: true } },
@@ -1485,6 +1531,7 @@ export class ProvidersService {
           u.role,
           u."isVerified",
           u."fullName" AS user_fullName,
+          u."phone" AS user_phone,
           a.id AS "addressId",
           a.cep,
           a.street,
@@ -1553,7 +1600,7 @@ export class ProvidersService {
         WHERE
             p."verificationStatus" = ${Prisma.raw(`'${VerificationStatus.APPROVED}'`)}
         GROUP BY
-            p.id, u.email, u.role, u."isVerified", u."fullName", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus"
+            p.id, u.email, u.role, u."isVerified", u."fullName", u."phone", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus"
         ORDER BY
             p."yearsOfExperience" DESC,  -- Ordena principal por experiência (como original)
             distance_m ASC  -- Secundário por distância se lat/lng fornecidos
@@ -1700,8 +1747,10 @@ export class ProvidersService {
               role: provider.role,
               isVerified: provider.isVerified,
               fullName: provider.user_fullName ?? provider.fullName,
+              phone: provider.user_phone,
             };
           }
+          provider.phone = provider.phone || provider.user_phone || null;
 
           let distance = undefined;
           if (
