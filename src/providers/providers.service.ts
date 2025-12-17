@@ -135,6 +135,7 @@ export type ProviderWithCalculatedRating = {
   ocrResult: Prisma.JsonValue | null;
   livenessResult: Prisma.JsonValue | null;
   badges?: string[]; // NOVO: Opcional para badges
+  userPhone?: string | null;
   user: {
     email: string;
     role: UserRole;
@@ -418,6 +419,7 @@ export class ProvidersService {
       ocrResult: provider.ocrResult,
       livenessResult: provider.livenessResult,
       badges: provider.badges || [], // NOVO: Incluído badges opcionais
+      userPhone: provider.user?.phone || null,
       user: {
         email: provider.user.email,
         role: provider.user.role,
@@ -1751,6 +1753,7 @@ export class ProvidersService {
             };
           }
           provider.phone = provider.phone || provider.user_phone || null;
+          provider.userPhone = provider.user_phone || null;
 
           let distance = undefined;
           if (
