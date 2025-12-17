@@ -1,0 +1,69 @@
+// src/offers/dto/offer-details.dto.ts
+import { ApiProperty } from '@nestjs/swagger';
+import {
+  Offer as PrismaOffer,
+  OfferStatus,
+  OfferTarget,
+  Prisma,
+} from '@prisma/client';
+
+/**
+ * DTO de resposta padronizada para ofertas.
+ * Alinhado com o modelo do Prisma para evitar conflitos de enumeração.
+ */
+export class OfferDetailsDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  title: string;
+
+  @ApiProperty({ required: false, nullable: true })
+  description?: string | null;
+
+  @ApiProperty({ enum: OfferStatus })
+  status: OfferStatus;
+
+  @ApiProperty({ enum: OfferTarget })
+  target: OfferTarget;
+
+  @ApiProperty({ required: false, nullable: true })
+  targetId?: string | null;
+
+  @ApiProperty()
+  createdAt: Date;
+
+  @ApiProperty()
+  updatedAt: Date;
+
+  @ApiProperty({ required: false, nullable: true })
+  validFrom?: Date | null;
+
+  @ApiProperty()
+  validUntil: Date;
+
+  @ApiProperty({ required: false, nullable: true, type: Number })
+  discountPercentage?: number | null;
+
+  @ApiProperty({ required: false, nullable: true, type: Number })
+  fixedDiscountAmount?: Prisma.Decimal | null;
+
+  @ApiProperty({ required: false, nullable: true })
+  imageUrl?: string | null;
+
+  constructor(o: PrismaOffer) {
+    this.id = o.id;
+    this.title = (o as any).title ?? (o as any).name ?? ''; // compat
+    this.description = (o as any).description ?? null;
+    this.status = o.status;
+    this.target = o.target;
+    this.targetId = (o as any).targetId ?? null;
+    this.createdAt = o.createdAt;
+    this.updatedAt = o.updatedAt;
+    this.validFrom = 'validFrom' in o ? (o as any).validFrom : null;
+    this.validUntil = (o as any).validUntil;
+    this.discountPercentage = (o as any).discountPercentage ?? null;
+    this.fixedDiscountAmount = (o as any).fixedDiscountAmount ?? null;
+    this.imageUrl = (o as any).imageUrl ?? null;
+  }
+}
