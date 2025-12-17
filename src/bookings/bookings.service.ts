@@ -173,6 +173,9 @@ export class BookingsService {
         title,
         body,
         targetUrl: `/client/bookings/${booking.id}`,
+        deeplink: `/agendamento/${booking.id}`,
+        priority: 1,
+        idempotencyKey: `notif:booking_status:${status}:${booking.id}:client`,
       });
     } catch (e) {
       this.logger.warn(`[BookingsService] notifyClientStatusUpdate falhou: ${e?.message || e}`);
@@ -1272,8 +1275,8 @@ export class BookingsService {
             clientUserId: updatedBooking.client?.userId,
             providerUserId: updatedBooking.provider?.userId,
             scheduledAt,
-            deeplinkClient: `/(client)/bookings/${updatedBooking.id}`,
-            deeplinkProvider: `/(provider)/active-booking/${updatedBooking.id}`,
+            deeplinkClient: `/agendamento/${updatedBooking.id}`,
+            deeplinkProvider: `/agendamento/${updatedBooking.id}`,
             locale,
           });
           this.logger.log(
@@ -1288,9 +1291,11 @@ export class BookingsService {
                 title: 'Pagamento confirmado',
                 body: `Seu serviço está confirmado para ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}.`,
                 data: {
-                  url: `/(client)/bookings/${updatedBooking.id}`,
+                  url: `/agendamento/${updatedBooking.id}`,
+                  deeplink: `/agendamento/${updatedBooking.id}`,
                   channelId: 'high-priority',
                   priority: 'max',
+                  idempotencyKey: `notif:booking_confirmed:client:${updatedBooking.id}`,
                 },
               },
             );
@@ -1303,9 +1308,11 @@ export class BookingsService {
                 title: 'Novo atendimento confirmado',
                 body: `Atendimento confirmado para ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}.`,
                 data: {
-                  url: `/(provider)/active-booking/${updatedBooking.id}`,
+                  url: `/agendamento/${updatedBooking.id}`,
+                  deeplink: `/agendamento/${updatedBooking.id}`,
                   channelId: 'high-priority',
                   priority: 'max',
+                  idempotencyKey: `notif:booking_confirmed:provider:${updatedBooking.id}`,
                 },
               },
             );
@@ -1675,6 +1682,22 @@ const updated = await this.prisma.booking.update({
     });
 
     await this.notifyClientStatusUpdate(updated, BookingStatus.STARTED);
+    // Push físico crítico: SERVICE_STARTED -> cliente
+    if (updated.client?.userId) {
+      const providerName = updated.provider?.user?.fullName || 'Prestador';
+      const scheduledAt =
+        updated.scheduledStart ||
+        this.getScheduledAtInSaoPaulo(updated.scheduledDate, updated.scheduledTime);
+      await this.queuesService.addNotificationJob('send-notification', {
+        userId: updated.client.userId,
+        kind: 'service_started',
+        title: 'Serviço iniciado',
+        body: `${providerName} iniciou o atendimento (${scheduledAt?.toLocaleString('pt-BR') || ''}).`,
+        deeplink: `/agendamento/${updated.id}`,
+        priority: 1,
+        idempotencyKey: `notif:service_started:client:${updated.id}`,
+      });
+    }
     return updated;
   }
 
@@ -1717,7 +1740,7 @@ const updated = await this.prisma.booking.update({
           kind: 'booking_finished',
           title: 'Serviço finalizado',
           body: `Seu atendimento com ${updated.provider?.user?.fullName || 'prestador'} foi finalizado.`,
-          deeplink: `/(client)/bookings/${updated.id}`,
+          deeplink: `/agendamento/${updated.id}`,
           priority: 1,
           idempotencyKey: `notif:booking_finished:client:${updated.id}`,
         });
@@ -1728,7 +1751,7 @@ const updated = await this.prisma.booking.update({
           kind: 'booking_finished',
           title: 'Serviço finalizado',
           body: `Atendimento ${updated.id} marcado como finalizado.`,
-          deeplink: `/(provider)/active-booking/${updated.id}`,
+          deeplink: `/agendamento/${updated.id}`,
           priority: 1,
           idempotencyKey: `notif:booking_finished:provider:${updated.id}`,
         });
@@ -1792,7 +1815,7 @@ const updated = await this.prisma.booking.update({
             kind: 'booking_finished',
             title: 'Serviço finalizado',
             body: `Seu atendimento com ${(updated as any).provider?.user?.fullName || 'prestador'} foi finalizado.`,
-            deeplink: `/(client)/bookings/${updated.id}`,
+            deeplink: `/agendamento/${updated.id}`,
             priority: 1,
             idempotencyKey: `notif:booking_finished:client:${updated.id}`,
           });
@@ -1803,7 +1826,7 @@ const updated = await this.prisma.booking.update({
             kind: 'booking_finished',
             title: 'Serviço finalizado',
             body: `Atendimento ${updated.id} marcado como finalizado.`,
-            deeplink: `/(provider)/active-booking/${updated.id}`,
+            deeplink: `/agendamento/${updated.id}`,
             priority: 1,
             idempotencyKey: `notif:booking_finished:provider:${updated.id}`,
           });
