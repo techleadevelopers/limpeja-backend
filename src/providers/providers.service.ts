@@ -1557,7 +1557,7 @@ export class ProvidersService {
         ORDER BY
             p."yearsOfExperience" DESC,  -- Ordena principal por experiência (como original)
             distance_m ASC  -- Secundário por distância se lat/lng fornecidos
-        LIMIT 5;  -- Top 5, como original
+        LIMIT 50;  -- Expandido para retornar mais aprovados
       `);
       } catch (err: any) {
         // Fallback seguro quando PostGIS/funcões geoespaciais não estão disponíveis
@@ -1592,7 +1592,7 @@ export class ProvidersService {
             availability: true,
           },
           orderBy: { yearsOfExperience: 'desc' },
-          take: 5,
+          take: 50,
         });
       }
     } else {
@@ -1632,7 +1632,7 @@ export class ProvidersService {
         orderBy: {
           yearsOfExperience: 'desc',
         },
-        take: 5,
+        take: 50,
       });
     }
 
