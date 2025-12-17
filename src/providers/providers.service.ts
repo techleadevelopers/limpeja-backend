@@ -374,6 +374,7 @@ export class ProvidersService {
       email: provider.user?.email || '',
       avatarUrl: provider.avatarUrl || null,
       phone: provider.phone || provider.user?.phone || null,
+      userPhone: provider.user?.phone || null,
       bio: provider.bio || null,
       verificationStatus: provider.verificationStatus, // NOVO: Incluído para selo
       address: provider.address ?? null,
@@ -419,7 +420,6 @@ export class ProvidersService {
       ocrResult: provider.ocrResult,
       livenessResult: provider.livenessResult,
       badges: provider.badges || [], // NOVO: Incluído badges opcionais
-      userPhone: provider.user?.phone || null,
       user: {
         email: provider.user.email,
         role: provider.user.role,
