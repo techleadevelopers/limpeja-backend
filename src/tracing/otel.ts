@@ -1,11 +1,20 @@
-import { diag, DiagConsoleLogger, DiagLogLevel, trace } from '@opentelemetry/api';
+import {
+  diag,
+  DiagConsoleLogger,
+  DiagLogLevel,
+  trace,
+} from '@opentelemetry/api';
 import { Resource } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 
-export function initTracing(options?: { serviceName?: string; otlpEndpoint?: string; debug?: boolean }) {
+export function initTracing(options?: {
+  serviceName?: string;
+  otlpEndpoint?: string;
+  debug?: boolean;
+}) {
   const serviceName = options?.serviceName || 'backend-cleaning';
   const otlpEndpoint =
     options?.otlpEndpoint ||
