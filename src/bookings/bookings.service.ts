@@ -12,6 +12,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import {
+  MIN_HOURLY_MINUTES,
+  COMMISSION_RATE,
+} from '../common/constants/pricing';
+import {
   Booking,
   BookingStatus,
   PaymentIntentStatus,
@@ -101,7 +105,10 @@ export class BookingsService {
     const base =
       booking.startedAt ||
       booking.scheduledStart ||
-      this.getScheduledAtInSaoPaulo(booking.scheduledDate, booking.scheduledTime);
+      this.getScheduledAtInSaoPaulo(
+        booking.scheduledDate,
+        booking.scheduledTime,
+      );
     const dur = booking.durationMinutes ?? 60;
     return new Date(base.getTime() + dur * 60 * 1000);
   }
@@ -169,7 +176,10 @@ export class BookingsService {
     try {
       await this.queuesService.addNotificationJob('send-notification', {
         userId,
-        kind: status === BookingStatus.FINISHED ? 'booking_finished' : 'booking_status',
+        kind:
+          status === BookingStatus.FINISHED
+            ? 'booking_finished'
+            : 'booking_status',
         title,
         body,
         targetUrl: `/client/bookings/${booking.id}`,
@@ -178,7 +188,9 @@ export class BookingsService {
         idempotencyKey: `notif:booking_status:${status}:${booking.id}:client`,
       });
     } catch (e) {
-      this.logger.warn(`[BookingsService] notifyClientStatusUpdate falhou: ${e?.message || e}`);
+      this.logger.warn(
+        `[BookingsService] notifyClientStatusUpdate falhou: ${e?.message || e}`,
+      );
     }
   }
 
@@ -306,6 +318,20 @@ export class BookingsService {
                 locale,
               ),
             );
+          }
+
+          // Enforce mínimo de 4h (240 min) para HOURLY
+          const normalizedDuration = Math.max(
+            createBookingDto.requestedDurationMinutes,
+            MIN_HOURLY_MINUTES,
+          );
+          if (
+            normalizedDuration !== createBookingDto.requestedDurationMinutes
+          ) {
+            this.logger.log(
+              `[BookingsService] create - Normalizando duração mínima para HOURLY: ${normalizedDuration} minutos.`,
+            );
+            createBookingDto.requestedDurationMinutes = normalizedDuration;
           }
 
           // Para HOURLY, usar pricePerHour se configurado; caso contrário, cair para price
@@ -902,10 +928,7 @@ export class BookingsService {
       userRole !== UserRole.ADMIN
     ) {
       throw new BadRequestException(
-        await this.i18n.translate(
-          'booking.badRequest.statusFinalized',
-          locale,
-        ),
+        await this.i18n.translate('booking.badRequest.statusFinalized', locale),
       );
     }
 
@@ -1049,9 +1072,7 @@ export class BookingsService {
       booking.status === BookingStatus.STARTED &&
       newStatus === BookingStatus.FINISHED
     ) {
-      const payStatus = booking.paymentIntent?.status as
-        | PaymentIntentStatus
-        | undefined;
+      const payStatus = booking.paymentIntent?.status;
       if (payStatus !== PaymentIntentStatus.PAID) {
         throw new BadRequestException(
           await this.i18n
@@ -1340,10 +1361,10 @@ export class BookingsService {
       const bookingId = updatedBooking.id;
 
       // Calcular a taxa da plataforma (take rate) e o valor líquido
-      const takeRatePercent = new Prisma.Decimal(
-        Math.max(0, Math.min(1, parseFloat(process.env.TAKE_RATE_PERCENT ?? '0.15')))
+      const commissionPercent = new Prisma.Decimal(
+        Math.max(0, Math.min(1, COMMISSION_RATE)),
       );
-      const feeAmount = grossAmount.mul(takeRatePercent);
+      const feeAmount = grossAmount.mul(commissionPercent);
       const netAmount = grossAmount.sub(feeAmount);
 
       // Verificar se as entradas de EARNING e HOLD (liberação) já existem para garantir idempotência
@@ -1351,7 +1372,11 @@ export class BookingsService {
         where: { bookingId: bookingId, type: LedgerEntryType.EARNING },
       });
       const holdReleaseExists = await this.prisma.ledgerEntry.findFirst({
-        where: { bookingId: bookingId, type: LedgerEntryType.HOLD, amount: { lt: 0 } }, // Procura por HOLD negativo (liberação)
+        where: {
+          bookingId: bookingId,
+          type: LedgerEntryType.HOLD,
+          amount: { lt: 0 },
+        }, // Procura por HOLD negativo (liberação)
       });
 
       if (!earningExists && !holdReleaseExists) {
@@ -1566,22 +1591,31 @@ export class BookingsService {
   }
 
   // NOVO: provider marca que está a caminho (CONFIRMED -> ON_THE_WAY)
-  async onTheWayService(bookingId: string, actorUserId: string): Promise<BookingWithDetailsRelations> {
+  async onTheWayService(
+    bookingId: string,
+    actorUserId: string,
+  ): Promise<BookingWithDetailsRelations> {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { client: { include: { user: true } }, provider: { include: { user: true } } },
+      include: {
+        client: { include: { user: true } },
+        provider: { include: { user: true } },
+      },
     });
     if (!booking) throw new NotFoundException('Booking não encontrado.');
-    if (booking.provider.userId !== actorUserId) throw new ForbiddenException('Somente o prestador pode atualizar.');
+    if (booking.provider.userId !== actorUserId)
+      throw new ForbiddenException('Somente o prestador pode atualizar.');
     if (booking.status !== BookingStatus.CONFIRMED) {
-      throw new BadRequestException(`Não é possível iniciar o trajeto: status atual é ${booking.status}.`);
+      throw new BadRequestException(
+        `Não é possível iniciar o trajeto: status atual é ${booking.status}.`,
+      );
     }
 
-// bloco de onTheWayService
-const updated = await this.prisma.booking.update({
-    where: { id: bookingId },
-    data: { status: BookingStatus.ON_THE_WAY },
-    include: {
+    // bloco de onTheWayService
+    const updated = await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: { status: BookingStatus.ON_THE_WAY },
+      include: {
         client: { include: { user: true } },
         provider: { include: { user: true } },
         providerService: { include: { service: true } },
@@ -1592,32 +1626,43 @@ const updated = await this.prisma.booking.update({
         guaranteeClaims: true, // Adicionado
         coupon: true, // Adicionado
         paymentIntent: true, // Adicionado
-    },
-});
+      },
+    });
 
     await this.notifyClientStatusUpdate(updated, BookingStatus.ON_THE_WAY);
-    this.logger.log(`[BookingsService] onTheWayService: Booking ${bookingId} está a caminho.`);
+    this.logger.log(
+      `[BookingsService] onTheWayService: Booking ${bookingId} está a caminho.`,
+    );
     return updated;
   }
 
   // NOVO: provider registra chegada (ON_THE_WAY -> ARRIVED)
-  async arriveAtLocation(bookingId: string, actorUserId: string): Promise<BookingWithDetailsRelations> {
+  async arriveAtLocation(
+    bookingId: string,
+    actorUserId: string,
+  ): Promise<BookingWithDetailsRelations> {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { client: { include: { user: true } }, provider: { include: { user: true } } },
+      include: {
+        client: { include: { user: true } },
+        provider: { include: { user: true } },
+      },
     });
     if (!booking) throw new NotFoundException('Booking não encontrado.');
-    if (booking.provider.userId !== actorUserId) throw new ForbiddenException('Somente o prestador pode atualizar.');
+    if (booking.provider.userId !== actorUserId)
+      throw new ForbiddenException('Somente o prestador pode atualizar.');
     if (booking.status !== BookingStatus.ON_THE_WAY) {
-      throw new BadRequestException(`Não é possível registrar a chegada: status atual é ${booking.status}.`);
+      throw new BadRequestException(
+        `Não é possível registrar a chegada: status atual é ${booking.status}.`,
+      );
     }
 
     const now = new Date();
-   // bloco de arriveAtLocation
-const updated = await this.prisma.booking.update({
-    where: { id: bookingId },
-    data: { status: BookingStatus.ARRIVED, arrivedAt: now },
-    include: {
+    // bloco de arriveAtLocation
+    const updated = await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: { status: BookingStatus.ARRIVED, arrivedAt: now },
+      include: {
         client: { include: { user: true } },
         provider: { include: { user: true } },
         providerService: { include: { service: true } },
@@ -1628,11 +1673,13 @@ const updated = await this.prisma.booking.update({
         guaranteeClaims: true, // Adicionado
         coupon: true, // Adicionado
         paymentIntent: true, // Adicionado
-    },
-});
+      },
+    });
 
     await this.notifyClientStatusUpdate(updated, BookingStatus.ARRIVED);
-    this.logger.log(`[BookingsService] arriveAtLocation: Booking ${bookingId} CHEGOU.`);
+    this.logger.log(
+      `[BookingsService] arriveAtLocation: Booking ${bookingId} CHEGOU.`,
+    );
     return updated;
   }
 
@@ -1649,7 +1696,9 @@ const updated = await this.prisma.booking.update({
     if (booking.provider.userId !== providerUserId)
       throw new ForbiddenException('Somente o prestador pode iniciar.');
     if (booking.status !== BookingStatus.ARRIVED)
-      throw new BadRequestException('Status inválido para iniciar. Deve ser ARRIVED.');
+      throw new BadRequestException(
+        'Status inválido para iniciar. Deve ser ARRIVED.',
+      );
     if (booking.paymentIntent?.status !== 'PAID')
       throw new BadRequestException('Pagamento não confirmado.');
 
@@ -1687,7 +1736,10 @@ const updated = await this.prisma.booking.update({
       const providerName = updated.provider?.user?.fullName || 'Prestador';
       const scheduledAt =
         updated.scheduledStart ||
-        this.getScheduledAtInSaoPaulo(updated.scheduledDate, updated.scheduledTime);
+        this.getScheduledAtInSaoPaulo(
+          updated.scheduledDate,
+          updated.scheduledTime,
+        );
       await this.queuesService.addNotificationJob('send-notification', {
         userId: updated.client.userId,
         kind: 'service_started',
@@ -1710,7 +1762,9 @@ const updated = await this.prisma.booking.update({
     if (booking.provider.userId !== providerUserId)
       throw new ForbiddenException('Somente o prestador pode concluir.');
     if (booking.status !== BookingStatus.STARTED)
-      throw new BadRequestException('Status inválido para concluir. Deve ser STARTED.');
+      throw new BadRequestException(
+        'Status inválido para concluir. Deve ser STARTED.',
+      );
     if (booking.paymentIntent?.status !== 'PAID')
       throw new BadRequestException('Pagamento não confirmado.');
 
@@ -1778,9 +1832,7 @@ const updated = await this.prisma.booking.update({
 
     const toComplete = inProgress.filter((b) => {
       const expectedEnd = this.getExpectedEnd(b as any);
-      const payStatus = b.paymentIntent?.status as
-        | PaymentIntentStatus
-        | undefined;
+      const payStatus = b.paymentIntent?.status;
       const paidOk = payStatus === PaymentIntentStatus.PAID;
       const notRefunded =
         payStatus !== PaymentIntentStatus.REFUNDED &&
@@ -2071,12 +2123,19 @@ const updated = await this.prisma.booking.update({
       const existingEarning = await this.prisma.ledgerEntry.findFirst({
         where: { bookingId: updatedBooking.id, type: LedgerEntryType.EARNING },
       });
+      const grossAmount = new Prisma.Decimal(updatedBooking.totalPrice);
+      const commissionPercent = new Prisma.Decimal(
+        Math.max(0, Math.min(1, COMMISSION_RATE)),
+      );
+      const feeAmount = grossAmount.mul(commissionPercent);
+      const netAmount = grossAmount.sub(feeAmount);
+
       if (!existingEarning) {
         await this.prisma.ledgerEntry.create({
           data: {
             userId: updatedBooking.provider.userId,
             bookingId: updatedBooking.id,
-            amount: new Prisma.Decimal(updatedBooking.totalPrice.toNumber()),
+            amount: netAmount,
             type: LedgerEntryType.EARNING,
             note: `Earning for finished booking ${updatedBooking.id}`,
           },
@@ -2089,24 +2148,16 @@ const updated = await this.prisma.booking.update({
       const feeExists = await this.prisma.ledgerEntry.findFirst({
         where: { bookingId: updatedBooking.id, type: LedgerEntryType.FEE },
       });
-      if (!feeExists) {
-        const takeRatePercent = Math.max(
-          0,
-          Math.min(1, parseFloat(process.env.TAKE_RATE_PERCENT ?? '0.15')),
-        );
-        const feeAmount =
-          Number(updatedBooking.totalPrice.toFixed(2)) * takeRatePercent;
-        if (feeAmount > 0) {
-          await this.prisma.ledgerEntry.create({
-            data: {
-              userId: updatedBooking.provider.userId,
-              bookingId: updatedBooking.id,
-              amount: new Prisma.Decimal(-feeAmount),
-              type: LedgerEntryType.FEE,
-              note: `Take rate fee for booking ${updatedBooking.id}`,
-            },
-          });
-        }
+      if (!feeExists && feeAmount.greaterThan(0)) {
+        await this.prisma.ledgerEntry.create({
+          data: {
+            userId: updatedBooking.provider.userId,
+            bookingId: updatedBooking.id,
+            amount: feeAmount.neg(),
+            type: LedgerEntryType.FEE,
+            note: `Take rate fee for booking ${updatedBooking.id}`,
+          },
+        });
       }
     }
 
