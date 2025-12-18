@@ -6,7 +6,9 @@ const HTTP_REQUEST_DURATION_NAME = 'http_request_duration_seconds';
 const HTTP_REQUEST_COUNTER_NAME = 'http_requests_total';
 
 const httpRequestDuration =
-  (register.getSingleMetric(HTTP_REQUEST_DURATION_NAME) as Histogram<'method' | 'route' | 'status_code'> | undefined) ??
+  (register.getSingleMetric(HTTP_REQUEST_DURATION_NAME) as
+    | Histogram<'method' | 'route' | 'status_code'>
+    | undefined) ??
   new Histogram({
     name: HTTP_REQUEST_DURATION_NAME,
     help: 'HTTP request duration in seconds',
@@ -15,7 +17,9 @@ const httpRequestDuration =
   });
 
 const httpRequestCounter =
-  (register.getSingleMetric(HTTP_REQUEST_COUNTER_NAME) as Counter<'method' | 'route' | 'status_code'> | undefined) ??
+  (register.getSingleMetric(HTTP_REQUEST_COUNTER_NAME) as
+    | Counter<'method' | 'route' | 'status_code'>
+    | undefined) ??
   new Counter({
     name: HTTP_REQUEST_COUNTER_NAME,
     help: 'Total number of HTTP requests',
@@ -29,8 +33,7 @@ export class HttpMetricsMiddleware implements NestMiddleware {
 
     res.on('finish', () => {
       const end = process.hrtime.bigint();
-      const durationSeconds =
-        Number(end - start) / 1_000_000_000; // nanoseconds to seconds
+      const durationSeconds = Number(end - start) / 1_000_000_000; // nanoseconds to seconds
 
       const method = (req.method || 'UNKNOWN').toUpperCase();
       // Remove querystring e normaliza rota
@@ -41,7 +44,9 @@ export class HttpMetricsMiddleware implements NestMiddleware {
         'unknown';
       const statusCode = res.statusCode || 0;
 
-      httpRequestDuration.labels(method, route, String(statusCode)).observe(durationSeconds);
+      httpRequestDuration
+        .labels(method, route, String(statusCode))
+        .observe(durationSeconds);
       httpRequestCounter.labels(method, route, String(statusCode)).inc();
     });
 
