@@ -50,7 +50,7 @@ export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
       };
     };
     bookings: {
-      where: { status: 'FINISHED' };// ✅ CORRIGIDO
+      where: { status: 'FINISHED' }; // ✅ CORRIGIDO
       orderBy: { createdAt: 'desc' };
       take: 100;
     };
@@ -60,11 +60,11 @@ export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
 
 // Tipo específico para a função updateProviderBadges
 type ProviderForBadgeUpdate = Prisma.ProviderGetPayload<{
-  include: {
-    user: { select: { isVerified: true } };
-    bookings: { where: { status: 'FINISHED' } }; // ✅ CORRIGIDO
-    reviewsReceived: { where: { rating: { gte: 4 } } };
-  };
+  include: {
+    user: { select: { isVerified: true } };
+    bookings: { where: { status: 'FINISHED' } }; // ✅ CORRIGIDO
+    reviewsReceived: { where: { rating: { gte: 4 } } };
+  };
 }>;
 
 // Tipo específico para a função findBestMatchingProvider
@@ -311,7 +311,7 @@ export class ProvidersService {
               gte: new Date(dateStr + 'T00:00:00Z'),
               lte: new Date(dateStr + 'T23:59:59Z'),
             },
-          status: { in: [BookingStatus.CONFIRMED, BookingStatus.STARTED] }, // ✅ CORRIGIDO. Assumi que 'IN_PROGRESS' é 'STARTED' ou outro status do seu `booking.state-machine.ts` (ex: STARTED). Use o valor correto do seu enum do Prisma.
+            status: { in: [BookingStatus.CONFIRMED, BookingStatus.STARTED] }, // ✅ CORRIGIDO. Assumi que 'IN_PROGRESS' é 'STARTED' ou outro status do seu `booking.state-machine.ts` (ex: STARTED). Use o valor correto do seu enum do Prisma.
           },
           select: { scheduledTime: true },
         });
@@ -1020,6 +1020,8 @@ export class ProvidersService {
       latitude,
       longitude,
       radius,
+      city,
+      state,
     } = searchDto;
 
     const cacheKey = `${this.PROVIDERS_CACHE_KEY}:search:${JSON.stringify(searchDto)}`;
@@ -1067,6 +1069,13 @@ export class ProvidersService {
           { street: { contains: location, mode: 'insensitive' } },
           { neighborhood: { contains: location, mode: 'insensitive' } },
         ],
+      };
+    }
+    if (city || state) {
+      where.address = {
+        ...(where.address as any),
+        ...(city ? { city: { contains: city, mode: 'insensitive' } } : {}),
+        ...(state ? { state: { contains: state, mode: 'insensitive' } } : {}),
       };
     }
 
@@ -1329,6 +1338,18 @@ export class ProvidersService {
         latitude,
         longitude,
       );
+      // Filtro adicional por cidade/estado quando fornecido
+      if (city || state) {
+        const cityLc = city?.toLowerCase();
+        const stateLc = state?.toLowerCase();
+        providersWithDistance = providersWithDistance.filter((p) => {
+          const c = p.address?.city?.toLowerCase();
+          const s = p.address?.state?.toLowerCase();
+          const cityOk = cityLc ? (c?.includes(cityLc) ?? false) : true;
+          const stateOk = stateLc ? (s?.includes(stateLc) ?? false) : true;
+          return cityOk && stateOk;
+        });
+      }
 
       if (minRating !== undefined) {
         providersWithDistance = providersWithDistance.filter(
@@ -1384,7 +1405,7 @@ export class ProvidersService {
           },
         },
         bookings: {
-          where: { status: 'FINISHED'},
+          where: { status: 'FINISHED' },
           orderBy: { createdAt: 'desc' },
           take: 100,
         },
@@ -1426,6 +1447,18 @@ export class ProvidersService {
       latitude,
       longitude,
     );
+    // Filtro adicional por cidade/estado quando fornecido
+    if (city || state) {
+      const cityLc = city?.toLowerCase();
+      const stateLc = state?.toLowerCase();
+      filteredProviders = filteredProviders.filter((p) => {
+        const c = p.address?.city?.toLowerCase();
+        const s = p.address?.state?.toLowerCase();
+        const cityOk = cityLc ? (c?.includes(cityLc) ?? false) : true;
+        const stateOk = stateLc ? (s?.includes(stateLc) ?? false) : true;
+        return cityOk && stateOk;
+      });
+    }
 
     if (minRating !== undefined) {
       filteredProviders = filteredProviders.filter(
@@ -1463,6 +1496,8 @@ export class ProvidersService {
     longitude?: number;
     radius?: number;
     sortBy?: SortByOption;
+    city?: string;
+    state?: string;
   }): Promise<ProviderWithCalculatedRating[]> {
     this.logger.log(
       `[ProvidersService] findAllProviders: Chamado com params: ${JSON.stringify(params)}`,
@@ -1473,6 +1508,8 @@ export class ProvidersService {
       longitude: params.longitude,
       radius: params.radius,
       sortBy: params.sortBy,
+      city: params.city,
+      state: params.state,
     };
     return this.search(searchDto);
   }
@@ -1898,41 +1935,41 @@ export class ProvidersService {
       },
     })) as ProviderForSmartMatching[];
 
-// Bloco de código dentro de uma função como findBestMatchingProvider
-// ...
-    const scoredProviders = providers
-      .map((p) => {
-        const averageRating =
-          p.reviewsReceived.length > 0
-            ? p.reviewsReceived.reduce((sum, r) => sum + r.rating, 0) /
-              p.reviewsReceived.length
-            : 0;
-        const completedBookings = p.bookings.filter(
-          (b) => b.status === 'FINISHED', // ✅ CORREÇÃO 1
-        ).length;
-        const hasConflict = p.bookings.some(
-          (b) =>
-            b.scheduledDate.toISOString().split('T')[0] ===
-              scheduledDate.toISOString().split('T')[0] &&
-            (b.status === BookingStatus.PENDING || // ✅ CORREÇÃO 2
-              b.status === BookingStatus.CONFIRMED || // ✅ CORREÇÃO 3 (Assumindo que 'CONFIRMED' é 'ACCEPTED')
-              b.status === BookingStatus.STARTED), // ✅ CORREÇÃO 4 (Assumindo que 'IN_PROGRESS' é 'STARTED')
-        );
+    // Bloco de código dentro de uma função como findBestMatchingProvider
+    // ...
+    const scoredProviders = providers
+      .map((p) => {
+        const averageRating =
+          p.reviewsReceived.length > 0
+            ? p.reviewsReceived.reduce((sum, r) => sum + r.rating, 0) /
+              p.reviewsReceived.length
+            : 0;
+        const completedBookings = p.bookings.filter(
+          (b) => b.status === 'FINISHED', // ✅ CORREÇÃO 1
+        ).length;
+        const hasConflict = p.bookings.some(
+          (b) =>
+            b.scheduledDate.toISOString().split('T')[0] ===
+              scheduledDate.toISOString().split('T')[0] &&
+            (b.status === BookingStatus.PENDING || // ✅ CORREÇÃO 2
+              b.status === BookingStatus.CONFIRMED || // ✅ CORREÇÃO 3 (Assumindo que 'CONFIRMED' é 'ACCEPTED')
+              b.status === BookingStatus.STARTED), // ✅ CORREÇÃO 4 (Assumindo que 'IN_PROGRESS' é 'STARTED')
+        );
 
-        let score = averageRating * 10 + completedBookings;
-        if (hasConflict) {
-          score -= 1000;
-        }
-        if (p.user.isVerified) {
-          score += 5;
-        }
+        let score = averageRating * 10 + completedBookings;
+        if (hasConflict) {
+          score -= 1000;
+        }
+        if (p.user.isVerified) {
+          score += 5;
+        }
 
-        return { provider: p, score };
-      })
-      .sort((a, b) => b.score - a.score);
+        return { provider: p, score };
+      })
+      .sort((a, b) => b.score - a.score);
 
-    return scoredProviders.map((sp) => sp.provider);
-  }
+    return scoredProviders.map((sp) => sp.provider);
+  }
 
   // NOVO MÉTODO: Atualiza métricas de performance do provedor (aceitação, tempo de resposta)
   // Este método seria chamado por um job agendado ou por hooks específicos (ex: ao confirmar booking, ao enviar mensagem no chat)
