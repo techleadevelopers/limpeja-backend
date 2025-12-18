@@ -157,7 +157,7 @@ export class UsersService {
                 include: { client: { include: { user: true } } },
               },
               bookings: {
-                where: {  status: 'FINISHED' },
+                where: { status: 'FINISHED' },
                 orderBy: { createdAt: 'desc' },
                 take: 100,
               },
@@ -227,7 +227,7 @@ export class UsersService {
                   include: { client: { include: { user: true } } },
                 },
                 bookings: {
-                  where: {  status: 'FINISHED' },
+                  where: { status: 'FINISHED' },
                   orderBy: { createdAt: 'desc' },
                   take: 100,
                 },
@@ -327,7 +327,7 @@ export class UsersService {
                 include: { client: { include: { user: true } } },
               },
               bookings: {
-                where: {  status: 'FINISHED' },
+                where: { status: 'FINISHED' },
                 orderBy: { createdAt: 'desc' },
                 take: 100,
               },
