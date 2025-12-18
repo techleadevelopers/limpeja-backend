@@ -34,7 +34,8 @@ async function bootstrap() {
   //                 OPEN TELEMETRY TRACING
   // =======================================================
   initTracing({
-    serviceName: configService.get<string>('OTEL_SERVICE_NAME') || 'backend-cleaning',
+    serviceName:
+      configService.get<string>('OTEL_SERVICE_NAME') || 'backend-cleaning',
     otlpEndpoint: configService.get<string>('OTEL_EXPORTER_OTLP_ENDPOINT'),
     debug: configService.get<string>('OTEL_DEBUG') === '1',
   });
@@ -54,9 +55,7 @@ async function bootstrap() {
     });
     console.log('[Sentry] Inicializado com sucesso.');
   } else {
-    console.warn(
-      '[Sentry] SENTRY_DSN não configurado. Sentry desativado.'
-    );
+    console.warn('[Sentry] SENTRY_DSN não configurado. Sentry desativado.');
   }
 
   // =======================================================
@@ -67,7 +66,7 @@ async function bootstrap() {
       req.setEncoding('utf8');
       let data = '';
 
-      req.on('data', chunk => {
+      req.on('data', (chunk) => {
         data += chunk;
       });
 
@@ -84,7 +83,6 @@ async function bootstrap() {
 
         return next();
       });
-
     } else {
       return next();
     }
@@ -136,8 +134,8 @@ async function bootstrap() {
       transform: true,
       transformOptions: { enableImplicitConversion: true },
 
-      exceptionFactory: errors => {
-        const messages = errors.map(error => {
+      exceptionFactory: (errors) => {
+        const messages = errors.map((error) => {
           const constraintMessage = Object.values(error.constraints ?? {})[0];
           return constraintMessage;
         });
@@ -163,9 +161,7 @@ async function bootstrap() {
     admin.initializeApp();
     console.log('[Firebase Admin] Inicializado automaticamente.');
   } catch (error: any) {
-    console.error(
-      `[Firebase Admin] Erro: ${error.message}`
-    );
+    console.error(`[Firebase Admin] Erro: ${error.message}`);
 
     if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
       try {
@@ -181,21 +177,20 @@ async function bootstrap() {
         });
 
         console.log(
-          '[Firebase Admin] Inicializado via GOOGLE_APPLICATION_CREDENTIALS.'
+          '[Firebase Admin] Inicializado via GOOGLE_APPLICATION_CREDENTIALS.',
         );
-
       } catch (innerError: any) {
         console.error(
-          `[Firebase Admin] Falha no carregamento manual: ${innerError.message}`
+          `[Firebase Admin] Falha no carregamento manual: ${innerError.message}`,
         );
 
         throw new Error(
-          'Firebase Admin SDK failed to initialize via GOOGLE_APPLICATION_CREDENTIALS.'
+          'Firebase Admin SDK failed to initialize via GOOGLE_APPLICATION_CREDENTIALS.',
         );
       }
     } else {
       console.warn(
-        '[Firebase Admin] SDK NÃO INICIALIZADO — notificações podem falhar.'
+        '[Firebase Admin] SDK NÃO INICIALIZADO — notificações podem falhar.',
       );
     }
   }
