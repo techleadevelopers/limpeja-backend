@@ -45,6 +45,27 @@ interface RequestUserPayload {
   providerId?: string;
 }
 
+type PagSeguroWebhookPayload = {
+  event?: string;
+  transaction?: { status?: string; reference_id?: string; id?: string };
+  data?: {
+    id?: string;
+    resource_id?: string;
+    transaction?: { status?: string; id?: string; reference_id?: string };
+  };
+  resource_id?: string;
+  reference_id?: string;
+};
+
+interface AuthenticatedRequest extends Request {
+  user?: RequestUserPayload;
+  rawBody?: Buffer | string;
+  bodyRaw?: Buffer | string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
 @ApiTags('payments')
 @Controller('payments')
 export class PaymentsController {
@@ -147,7 +168,7 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Webhook de pagamentos (orders/charges).' })
   async handlePaymentWebhook(
     @Headers('x-signature') signature: string,
-    @Body() payload: any,
+    @Body() payload: PagSeguroWebhookPayload,
   ) {
     return this.paymentsService.handlePaymentWebhook(signature, payload);
   }
@@ -158,13 +179,17 @@ export class PaymentsController {
   @Post('webhook/pix')
   @Header('Content-Type', 'application/json')
   @HttpCode(HttpStatus.OK)
-  public async handlePixWebhook(@Req() req: Request, @Res() res: Response) {
-    const rawBody: string =
-      (req as any).rawBody?.toString?.() ??
-      (req as any).bodyRaw?.toString?.() ??
-      '';
+  public async handlePixWebhook(
+    @Req() req: AuthenticatedRequest,
+    @Res() res: Response,
+  ) {
+    const rawBodyInput = req.rawBody ?? req.bodyRaw ?? '';
+    const rawBody =
+      typeof rawBodyInput === 'string'
+        ? rawBodyInput
+        : rawBodyInput.toString('utf8');
 
-    let parsed: any;
+    let parsed: Record<string, unknown> = {};
     try {
       // Se vier Buffer → converte pra string antes
       const text = Buffer.isBuffer(rawBody)
@@ -172,16 +197,17 @@ export class PaymentsController {
         : rawBody;
 
       // 1 → tenta JSON normalmente
-      parsed = JSON.parse(text);
+      const parsedJson: unknown = JSON.parse(text);
+      if (isRecord(parsedJson)) {
+        parsed = parsedJson;
+      }
       console.log('[Webhook PIX] JSON parseado com sucesso');
       console.log('>>> WEBHOOK PARSED:', parsed);
     } catch {
       console.log('[Webhook PIX] JSON inválido → usando string bruta');
 
       // 2 → tenta transformar form-data URL-encoded para objeto
-      parsed = Object.fromEntries(
-        new URLSearchParams(rawBody?.toString() ?? ''),
-      );
+      parsed = Object.fromEntries(new URLSearchParams(rawBody ?? ''));
     }
     const result = await this.paymentsService.handlePixWebhook(rawBody, parsed);
 
@@ -198,7 +224,7 @@ export class PaymentsController {
   async handleWithdrawalWebhook(
     @Headers('x-signature') signature: string,
     @Headers('x-event-id') eventId: string,
-    @Body() payload: any,
+    @Body() payload: Record<string, unknown>,
   ) {
     return this.paymentsService.handleWithdrawalWebhook(
       signature,
@@ -213,14 +239,16 @@ export class PaymentsController {
   @Get('transactions')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  async listTransactions(@Req() req: any) {
+  async listTransactions(@Req() req: AuthenticatedRequest) {
     if (req.user?.role !== 'ADMIN')
       throw new InternalServerErrorException('Admin only');
 
-    return this.paymentsService.listTransactions(
-      req.query?.type,
-      req.query?.status,
-    );
+    const { type, status } = req.query as {
+      type?: string;
+      status?: string;
+    };
+
+    return this.paymentsService.listTransactions(type, status);
   }
 
   // ===========================================================================
@@ -230,7 +258,7 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   async refund(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Param('transactionId') transactionId: string,
     @Body() body: { amount?: number },
   ) {
@@ -246,11 +274,13 @@ export class PaymentsController {
   @Get('withdrawals')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  async listWithdrawals(@Req() req: any) {
+  async listWithdrawals(@Req() req: AuthenticatedRequest) {
     if (req.user?.role !== 'ADMIN')
       throw new InternalServerErrorException('Admin only');
 
-    return this.paymentsService.listWithdrawals(req.query?.status);
+    const { status } = req.query as { status?: string };
+
+    return this.paymentsService.listWithdrawals(status);
   }
 
   // ===========================================================================
@@ -260,7 +290,7 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   async registerWebhooks(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Body() body: { pixUrl?: string; payoutsUrl?: string },
   ) {
     if (req.user?.role !== 'ADMIN')
@@ -278,7 +308,10 @@ export class PaymentsController {
   @Patch('withdrawals/:id/approve')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  async approveWithdrawal(@Req() req: any, @Param('id') id: string) {
+  async approveWithdrawal(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
     if (req.user?.role !== 'ADMIN')
       throw new InternalServerErrorException('Admin only');
 
@@ -289,7 +322,7 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   async rejectWithdrawal(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
     @Body() body: { reason?: string },
   ) {
