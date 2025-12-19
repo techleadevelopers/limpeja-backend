@@ -477,6 +477,7 @@ model Booking {
   scheduledDate              DateTime
   scheduledTime              String
   scheduledStart             DateTime?
+  scheduledEnd               DateTime?
   durationMinutes            Int?
   status                     BookingStatus     @default(PENDING)
   
