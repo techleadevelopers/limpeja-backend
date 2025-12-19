@@ -11,6 +11,7 @@ import { MarkAsReadDto } from './dto/mark-as-read.dto';
 import { I18nService } from '../common/i18n/i18n.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import * as Sentry from '@sentry/node'; // NEW: Import Sentry (conceptual, requires setup)
+import type { SeverityLevel } from '@sentry/core';
 import axios from 'axios';
 
 @Injectable()
@@ -225,10 +226,15 @@ export class NotificationsService {
         where: { id: userId },
         select: { fcmToken: true },
       });
-      if (!user?.fcmToken) {
-        this.logger.warn(`Sem fcmToken para ${userId}`);
-        return;
-      }
+    if (!user?.fcmToken) {
+      this.logger.warn(`Sem fcmToken para ${userId}; push será simulado com notif DB.`);
+      Sentry.addBreadcrumb({
+        message: 'Token ausente ao enviar push',
+        data: { userId, hasToken: false },
+        level: 'warning' as SeverityLevel,
+      });
+      return;
+    }
       const token = user.fcmToken;
       const serverKey = process.env.FCM_SERVER_KEY;
       const getStringField = (key: string, fallback: string) => {
