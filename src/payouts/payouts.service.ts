@@ -33,6 +33,11 @@ interface GatewayUpdateInput {
   gatewayTxnId?: string;
 }
 
+const isPayoutStatus = (value?: string): value is PayoutStatus => {
+  if (!value) return false;
+  return Object.values(PayoutStatus).includes(value as PayoutStatus);
+};
+
 @Injectable()
 export class PayoutsService {
   private readonly logger = new Logger(PayoutsService.name);
@@ -140,17 +145,19 @@ export class PayoutsService {
     sortBy?: string,
     sortDir?: 'asc' | 'desc',
   ) {
-    const where: Prisma.PayoutWhereInput = {};
-    if (status) (where as any).status = status as any;
-    else (where as any).status = PayoutStatus.PENDING;
-    if (userId) (where as any).userId = userId;
-    if (email && email.trim())
-      (where as any).user = {
-        email: { contains: email.trim(), mode: 'insensitive' },
-      } as any;
+    const where: Prisma.PayoutWhereInput = {
+      status: isPayoutStatus(status) ? status : PayoutStatus.PENDING,
+    };
+    if (userId) where.userId = userId;
+    if (email && email.trim()) {
+      const emailTrim = email.trim();
+      where.user = {
+        email: { contains: emailTrim, mode: 'insensitive' },
+      };
+    }
 
     // Filtro por intervalo de datas em requestedAt
-    const dateFilter: any = {};
+    const dateFilter: Prisma.DateTimeFilter = {};
     if (from) {
       const d = new Date(from);
       if (!isNaN(d.getTime())) dateFilter.gte = d;
@@ -159,8 +166,9 @@ export class PayoutsService {
       const d = new Date(to);
       if (!isNaN(d.getTime())) dateFilter.lte = d;
     }
-    if (Object.keys(dateFilter).length > 0)
-      (where as any).requestedAt = dateFilter as Prisma.DateTimeFilter;
+    if (Object.keys(dateFilter).length > 0) {
+      where.requestedAt = dateFilter;
+    }
 
     // Ordenação segura
     const allowedSorts = new Set(['requestedAt', 'amount', 'status']);
@@ -171,19 +179,17 @@ export class PayoutsService {
 
     const items = await this.prisma.payout.findMany({
       where,
-      orderBy: { [field]: dir } as any,
+      orderBy: { [field]: dir } as Prisma.PayoutOrderByWithRelationInput,
       include: { user: true },
     });
     return items.map((p) => ({
       id: p.id,
       userId: p.userId,
-      userEmail: (p as any).user?.email ?? undefined,
+      userEmail: p.user?.email ?? undefined,
       amount: Number(p.amount),
       status: p.status,
-      requestedAt: (p.requestedAt as any as Date).toISOString(),
-      processedAt: p.processedAt
-        ? (p.processedAt as any as Date).toISOString()
-        : null,
+      requestedAt: p.requestedAt.toISOString(),
+      processedAt: p.processedAt ? p.processedAt.toISOString() : null,
       gatewayTxnId: p.gatewayTxnId ?? null,
     }));
   }
@@ -404,8 +410,13 @@ export class PayoutsService {
             'Missing PIX key. Configure your PIX key first.',
           );
         }
+        const providerPixKeyType = (
+          provider as {
+            pixKeyType?: PixKeyType;
+          }
+        ).pixKeyType;
         const effectivePixKeyType: PixKeyType | undefined =
-          dto.pixKeyType as any;
+          dto.pixKeyType ?? providerPixKeyType ?? undefined;
 
         // Fees
         const percentFee = amount.mul(this.withdrawalPercentFee);
