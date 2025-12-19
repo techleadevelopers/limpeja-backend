@@ -5,6 +5,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as admin from 'firebase-admin';
+import * as fs from 'fs';
 import * as path from 'path';
 import { json, urlencoded } from 'express';
 import * as Sentry from '@sentry/node';
@@ -170,7 +171,8 @@ async function bootstrap() {
           process.env.GOOGLE_APPLICATION_CREDENTIALS,
         );
 
-        const serviceAccount = require(serviceAccountPath);
+        const serviceAccountRaw = fs.readFileSync(serviceAccountPath, 'utf8');
+        const serviceAccount = JSON.parse(serviceAccountRaw);
 
         admin.initializeApp({
           credential: admin.credential.cert(serviceAccount),
@@ -241,4 +243,7 @@ async function bootstrap() {
   console.timeEnd('AppStartupTotal');
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  console.error('Nest bootstrap failed', err);
+  process.exit(1);
+});
