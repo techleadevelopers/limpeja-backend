@@ -5,28 +5,22 @@ import {
   Body,
   UseGuards,
   Request,
-  Get,
   UnauthorizedException,
   Logger,
-  HttpCode,
-  HttpStatus,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { LoginDto } from './dto/login.dto'; // Para login por email/senha
 import { RegisterClientDto } from './dto/register-client.dto';
 import { RegisterProviderDto } from './dto/register-provider.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
-import { UserProfileDto } from '../users/dto/user-profile.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { LocalAuthGuard } from '../auth/guards/local-auth.guard';
+import { User } from '@prisma/client';
+import { Request as ExpressRequest } from 'express';
+
+type AuthenticatedRequest = ExpressRequest & { user?: User };
 // import { ThrottlerGuard } from '@nestjs/throttler'; // Importe se estiver usando Throttler
 
 @ApiTags('auth')
@@ -87,11 +81,15 @@ export class AuthController {
     type: AuthResponseDto,
   })
   @ApiResponse({ status: 401, description: 'Credenciais inválidas.' })
-  async login(@Request() req): Promise<AuthResponseDto> {
+  async login(@Request() req: AuthenticatedRequest): Promise<AuthResponseDto> {
+    const user = req.user;
+    if (!user) {
+      throw new UnauthorizedException('Usuário não encontrado na requisição.');
+    }
     this.logger.log(
-      `[AuthController] login: Recebida solicitação de login para usuário: ${req.user ? req.user.email : 'N/A'}`,
+      `[AuthController] login: Recebida solicitação de login para usuário: ${user.email}`,
     );
-    return this.authService.login(req.user);
+    return this.authService.login(user);
   }
 
   // Existing forgot-password - Mantido
