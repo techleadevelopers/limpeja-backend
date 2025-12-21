@@ -45,7 +45,7 @@ export class ProviderPromotionsService {
           id: true,
           description: true,
           costPoints: true,
-          rewardType: true,
+          type: true,
         },
       }),
     ]);
@@ -67,9 +67,9 @@ export class ProviderPromotionsService {
         currentPoints,
         availableRewards: rewards.map((reward) => ({
           rewardId: reward.id,
-          description: reward.description ?? reward.rewardType,
+          description: reward.description ?? reward.type,
           costPoints: reward.costPoints,
-          rewardType: reward.rewardType,
+          rewardType: reward.type,
         })),
       },
       earnings: earningsResponse.earningsView,
