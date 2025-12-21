@@ -12,6 +12,7 @@ import { EmailModule } from '../email/email.module';
 import { QueuesModule } from '../queues/queues.module';
 import { PayoutsModule } from '../payouts/payouts.module';
 import { ConnectModule } from '../connect/connect.module';
+import { CacheModule } from '../cache/cache.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ConnectModule } from '../connect/connect.module';
     CouponsModule,
     NotificationsModule,
     EmailModule,
+    CacheModule,
     forwardRef(() => QueuesModule),
     forwardRef(() => PayoutsModule),
     ConnectModule,
