@@ -16,7 +16,7 @@ import { ConnectModule } from '../connect/connect.module';
 @Module({
   imports: [
     PrismaModule,
-    ProvidersModule,
+    forwardRef(() => ProvidersModule),
     forwardRef(() => BookingsModule),
     CouponsModule,
     NotificationsModule,
