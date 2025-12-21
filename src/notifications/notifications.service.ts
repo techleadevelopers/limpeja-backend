@@ -219,7 +219,7 @@ export class NotificationsService {
     data?: Record<string, unknown>,
   ): Promise<void> {
     this.logger.log(
-      `Iniciando envio de notifica��o push para userId: ${userId}`,
+      `Iniciando envio de notificação push para userId: ${userId}`,
     );
     try {
       const user = await this.prisma.user.findUnique({
@@ -293,7 +293,7 @@ export class NotificationsService {
         error instanceof Error ? error.stack : undefined,
       );
       throw new Error(
-        `Falha ao enviar notifica��o push: ${this.formatError(error)}`,
+        `Falha ao enviar notificação push: ${this.formatError(error)}`,
       );
     }
   }
