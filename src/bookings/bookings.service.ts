@@ -46,20 +46,75 @@ import { Request } from 'express';
 
 import { RedisLockService } from '../common/locks/redis-lock.service';
 
+const DEFAULT_BOOKING_DETAILS_INCLUDE = {
+  client: { include: { user: true } },
+  provider: { include: { user: true } },
+  providerService: { include: { service: true } },
+  review: true,
+  address: true,
+  subscription: true,
+  incidents: true,
+  guaranteeClaims: true,
+  coupon: true,
+  paymentIntent: true,
+} satisfies Prisma.BookingInclude;
+
 export type BookingWithDetailsRelations = Prisma.BookingGetPayload<{
-  include: {
-    client: { include: { user: true } };
-    provider: { include: { user: true } };
-    providerService: { include: { service: true } };
-    review: true;
-    address: true;
-    subscription: true;
-    incidents: true;
-    guaranteeClaims: true;
-    coupon: true;
-    paymentIntent: true;
-  };
+  include: typeof DEFAULT_BOOKING_DETAILS_INCLUDE;
 }>;
+
+const BOOKING_STATUS_TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
+  [BookingStatus.PENDING]: [
+    BookingStatus.CONFIRMED,
+    BookingStatus.REJECTED,
+    BookingStatus.CANCELED,
+    BookingStatus.PENDING_DISPUTE,
+  ],
+  [BookingStatus.PENDING_PROVIDER_CONFIRMATION]: [
+    BookingStatus.CONFIRMED,
+    BookingStatus.REJECTED,
+    BookingStatus.CANCELED,
+    BookingStatus.PENDING_DISPUTE,
+  ],
+  [BookingStatus.CONFIRMED]: [
+    BookingStatus.ON_THE_WAY,
+    BookingStatus.ARRIVED,
+    BookingStatus.STARTED,
+    BookingStatus.FINISHED,
+    BookingStatus.CANCELED,
+    BookingStatus.RESCHEDULED,
+    BookingStatus.PENDING_DISPUTE,
+  ],
+  [BookingStatus.ON_THE_WAY]: [
+    BookingStatus.ARRIVED,
+    BookingStatus.CANCELED,
+    BookingStatus.PENDING_DISPUTE,
+  ],
+  [BookingStatus.ARRIVED]: [
+    BookingStatus.STARTED,
+    BookingStatus.CANCELED,
+    BookingStatus.PENDING_DISPUTE,
+  ],
+  [BookingStatus.STARTED]: [
+    BookingStatus.FINISHED,
+    BookingStatus.CANCELED,
+    BookingStatus.PENDING_DISPUTE,
+  ],
+  [BookingStatus.RESCHEDULED]: [
+    BookingStatus.CONFIRMED,
+    BookingStatus.CANCELED,
+    BookingStatus.PENDING_DISPUTE,
+  ],
+  [BookingStatus.PENDING_DISPUTE]: [
+    BookingStatus.FINISHED,
+    BookingStatus.CANCELED,
+    BookingStatus.NO_SHOW,
+  ],
+  [BookingStatus.FINISHED]: [],
+  [BookingStatus.CANCELED]: [],
+  [BookingStatus.REJECTED]: [],
+  [BookingStatus.NO_SHOW]: [],
+};
 
 @Injectable()
 export class BookingsService {
@@ -178,6 +233,86 @@ export class BookingsService {
     }
 
     return guess;
+  }
+
+  private getBookingInclude(
+    include?: Prisma.BookingInclude,
+  ): Prisma.BookingInclude {
+    return include ?? DEFAULT_BOOKING_DETAILS_INCLUDE;
+  }
+
+  private async fetchBookingWithDetails(
+    bookingId: string,
+    include?: Prisma.BookingInclude,
+  ): Promise<BookingWithDetailsRelations> {
+    const includeWithDefaults = this.getBookingInclude(include);
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: includeWithDefaults,
+    });
+    if (!booking) {
+      throw new NotFoundException(
+        `Booking ${bookingId} não encontrado.`,
+      );
+    }
+    return booking as unknown as BookingWithDetailsRelations;
+  }
+
+  private assertValidBookingTransition(
+    from: BookingStatus,
+    to: BookingStatus,
+  ): void {
+    if (from === to) {
+      return;
+    }
+    const allowed = BOOKING_STATUS_TRANSITIONS[from];
+    if (!allowed || !allowed.includes(to)) {
+      throw new Error(
+        `[BookingsService] transição inválida de ${from} para ${to}.`,
+      );
+    }
+  }
+
+  private async changeBookingStatus(
+    bookingId: string,
+    newStatus: BookingStatus,
+    context: {
+      booking?: Booking;
+      data?: Prisma.BookingUpdateInput;
+      include?: Prisma.BookingInclude;
+    } = {},
+  ): Promise<BookingWithDetailsRelations> {
+    const currentStatus =
+      context.booking?.status ??
+      (
+        await this.prisma.booking.findUnique({
+          where: { id: bookingId },
+          select: { status: true },
+        })
+      )?.status;
+
+    if (!currentStatus) {
+      throw new NotFoundException(
+        `Booking ${bookingId} não encontrado.`,
+      );
+    }
+
+    if (currentStatus === newStatus) {
+      return this.fetchBookingWithDetails(bookingId, context.include);
+    }
+
+    this.assertValidBookingTransition(currentStatus, newStatus);
+
+    const updatedBooking = (await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        status: newStatus,
+        ...(context.data ?? {}),
+      },
+      include: this.getBookingInclude(context.include),
+    })) as unknown as BookingWithDetailsRelations;
+
+    return updatedBooking;
   }
 
   // Helper: common notification helper to inform client about provider status updates
@@ -1030,6 +1165,13 @@ export class BookingsService {
       }
     }
 
+    if (booking.status === newStatus) {
+      this.logger.log(
+        `[BookingsService] updateStatus: booking ${id} already in status ${newStatus}, skipping redundant transition.`,
+      );
+      return this.fetchBookingWithDetails(id);
+    }
+
     let canUpdate = false;
     let errorMessageKey: string = 'booking.badRequest.invalidStatusTransition';
 
@@ -1148,6 +1290,19 @@ export class BookingsService {
       `[BookingsService] updateStatus - Status de agendamento validado. Atualizando no DB.`,
     );
 
+    try {
+      this.assertValidBookingTransition(booking.status, newStatus);
+    } catch (error) {
+      this.logger.warn(
+        `[BookingsService] updateStatus - ${error?.message ?? 'invalid transition'}`,
+      );
+      throw new BadRequestException(
+        await this.i18n.translate('booking.badRequest.invalidStatusTransition', locale, {
+          status: booking.status,
+        }),
+      );
+    }
+
     const now = new Date();
     const dataToUpdate: Prisma.BookingUpdateInput = { status: newStatus };
 
@@ -1173,11 +1328,13 @@ export class BookingsService {
           msg || 'Início fora da janela permitida.',
         );
       }
-      (dataToUpdate as any).startedAt = now;
-      (dataToUpdate as any).startedByUserId =
-        (request as any)?.user?.['userId'] ||
-        (request as any)?.user?.['id'] ||
-        null;
+      dataToUpdate.startedAt = now;
+      const startActorId =
+        (request as any)?.user?.['userId'] ??
+        (request as any)?.user?.['id'];
+      if (startActorId) {
+        dataToUpdate.startedByUser = { connect: { id: startActorId } };
+      }
     }
 
     if (
@@ -1224,14 +1381,17 @@ export class BookingsService {
           msg || 'Finalização muito cedo em relação ao horário previsto.',
         );
       }
-      (dataToUpdate as any).completedAt = now;
-      (dataToUpdate as any).completedByUserId =
-        (request as any)?.user?.['userId'] ||
-        (request as any)?.user?.['id'] ||
-        null;
+      dataToUpdate.completedAt = now;
+      const completeActorId =
+        (request as any)?.user?.['userId'] ??
+        (request as any)?.user?.['id'];
+      if (completeActorId) {
+        dataToUpdate.completedByUser = { connect: { id: completeActorId } };
+      }
     }
 
     if (newStatus === BookingStatus.FINISHED) {
+      // side-effects: cliente/provedor stats + loyalty + review notifications
       await this.prisma.client.update({
         where: { id: booking.clientId },
         data: { completedBookingsCount: { increment: 1 } },
@@ -1280,6 +1440,7 @@ export class BookingsService {
         `[BookingsService] updateStatus: Notificação de avaliação adicionada à fila para cliente ${booking.client.userId}.`,
       );
 
+      // side-effects: missions + coupons
       try {
         await this.missionsService.trackEvent(
           booking.client.userId,
@@ -1327,6 +1488,7 @@ export class BookingsService {
         );
       }
 
+      // side-effects: referrals
       try {
         await this.referralsService.handleBookingCompletedForReferral(
           booking.client.userId,
@@ -1339,6 +1501,7 @@ export class BookingsService {
       }
     }
 
+    // side-effects: client cancellation/no-show counters
     if (
       newStatus === BookingStatus.CANCELED &&
       booking.status !== BookingStatus.CANCELED
@@ -1363,23 +1526,13 @@ export class BookingsService {
       );
     }
 
-    const updatedBooking = await this.prisma.booking.update({
-      where: { id },
+    const updatedBooking = await this.changeBookingStatus(id, newStatus, {
+      booking,
       data: dataToUpdate,
-      include: {
-        client: { include: { user: true } },
-        provider: { include: { user: true } },
-        providerService: { include: { service: true } },
-        review: true,
-        address: true,
-        subscription: true,
-        incidents: true,
-        guaranteeClaims: true,
-        coupon: true,
-        paymentIntent: true,
-      },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
+    // side-effects: confirmed reminders + notifications
     if (newStatus === BookingStatus.CONFIRMED) {
       try {
         const scheduledAt = this.getScheduledAtInSaoPaulo(
@@ -1444,6 +1597,7 @@ export class BookingsService {
       }
     }
 
+    // side-effects: ledger entries + fee validation
     if (
       newStatus === BookingStatus.FINISHED &&
       updatedBooking.provider?.userId
@@ -1698,23 +1852,12 @@ export class BookingsService {
     }
 
     // bloco de onTheWayService
-    const updated = await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: BookingStatus.ON_THE_WAY },
-      include: {
-        client: { include: { user: true } },
-        provider: { include: { user: true } },
-        providerService: { include: { service: true } },
-        review: true,
-        address: true,
-        subscription: true, // Adicionado
-        incidents: true, // Adicionado
-        guaranteeClaims: true, // Adicionado
-        coupon: true, // Adicionado
-        paymentIntent: true, // Adicionado
-      },
+    const updated = await this.changeBookingStatus(bookingId, BookingStatus.ON_THE_WAY, {
+      booking,
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
+    // side-effects: notifications
     await this.notifyClientStatusUpdate(updated, BookingStatus.ON_THE_WAY);
     this.logger.log(
       `[BookingsService] onTheWayService: Booking ${bookingId} está a caminho.`,
@@ -1745,23 +1888,13 @@ export class BookingsService {
 
     const now = new Date();
     // bloco de arriveAtLocation
-    const updated = await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: BookingStatus.ARRIVED, arrivedAt: now },
-      include: {
-        client: { include: { user: true } },
-        provider: { include: { user: true } },
-        providerService: { include: { service: true } },
-        review: true,
-        address: true,
-        subscription: true, // Adicionado
-        incidents: true, // Adicionado
-        guaranteeClaims: true, // Adicionado
-        coupon: true, // Adicionado
-        paymentIntent: true, // Adicionado
-      },
+    const updated = await this.changeBookingStatus(bookingId, BookingStatus.ARRIVED, {
+      booking,
+      data: { arrivedAt: now },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
+    // side-effects: notifications
     await this.notifyClientStatusUpdate(updated, BookingStatus.ARRIVED);
     this.logger.log(
       `[BookingsService] arriveAtLocation: Booking ${bookingId} CHEGOU.`,
@@ -1801,27 +1934,16 @@ export class BookingsService {
       throw new BadRequestException('Fora da janela de início (±15min).');
     }
 
-    const updated = await this.prisma.booking.update({
-      where: { id: bookingId },
+    const updated = await this.changeBookingStatus(bookingId, BookingStatus.STARTED, {
+      booking,
       data: {
         startedAt: now,
-        status: BookingStatus.STARTED,
-        startedByUserId: providerUserId,
+        startedByUser: { connect: { id: providerUserId } },
       },
-      include: {
-        client: { include: { user: true } },
-        provider: { include: { user: true } },
-        providerService: { include: { service: true } },
-        review: true,
-        address: true,
-        subscription: true,
-        incidents: true,
-        guaranteeClaims: true,
-        coupon: true,
-        paymentIntent: true,
-      },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
+    // side-effects: notifications
     await this.notifyClientStatusUpdate(updated, BookingStatus.STARTED);
     // Push físico crítico: SERVICE_STARTED -> cliente
     if (updated.client?.userId) {
@@ -1864,21 +1986,16 @@ export class BookingsService {
     if (new Date() < expectedEnd)
       throw new BadRequestException('Ainda não atingiu o horário final.');
 
-    const updated = await this.prisma.booking.update({
-      where: { id: bookingId },
+    const updated = await this.changeBookingStatus(bookingId, BookingStatus.FINISHED, {
+      booking,
       data: {
         completedAt: new Date(),
-        status: BookingStatus.FINISHED,
-        completedByUserId: providerUserId,
+        completedByUser: { connect: { id: providerUserId } },
       },
-      include: {
-        client: { include: { user: true } },
-        provider: { include: { user: true } },
-        providerService: { include: { service: true } },
-        paymentIntent: true,
-      },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
+    // side-effects: notifications
     try {
       if (updated.client?.userId) {
         await this.queuesService.addNotificationJob('send-notification', {
@@ -1934,23 +2051,18 @@ export class BookingsService {
 
     for (const b of toComplete) {
       const expectedEnd = this.getExpectedEnd(b as any);
-      const updated = await this.prisma.booking.update({
-        where: { id: b.id },
+      const updated = await this.changeBookingStatus(b.id, BookingStatus.FINISHED, {
+        booking: b as Booking,
         data: {
-          status: BookingStatus.FINISHED,
           completedAt: expectedEnd ?? now,
         },
-        include: {
-          client: { include: { user: true } },
-          provider: { include: { user: true } },
-          providerService: { include: { service: true } },
-          paymentIntent: true,
-        },
+        include: DEFAULT_BOOKING_DETAILS_INCLUDE,
       });
       this.logger.log(
         `[BookingsService] autoCompleteOverdueBookings: booking ${b.id} marcado como FINISHED automaticamente.`,
       );
 
+      // side-effects: notifications
       // Notificar cliente e prestador na conclusão automática
       try {
         if ((updated as any).client?.userId) {
@@ -2182,26 +2294,12 @@ export class BookingsService {
     }
 
     const finalStatus = newStatus || BookingStatus.FINISHED;
-    const updatedBooking = await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: {
-        status: finalStatus,
-      },
-      include: {
-        client: { include: { user: true } },
-        provider: { include: { user: true } },
-        providerService: { include: { service: true } },
-        review: true,
-        address: true,
-        subscription: true,
-        incidents: true,
-        guaranteeClaims: true,
-        coupon: true,
-        paymentIntent: true,
-      },
+    const updatedBooking = await this.changeBookingStatus(bookingId, finalStatus, {
+      booking,
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
-    // Criar entradas no Ledger quando completar (idempotente por bookingId)
+    // side-effects: ledger adjustments quando finaliza disputa
     if (
       finalStatus === BookingStatus.FINISHED &&
       updatedBooking.provider?.userId
@@ -2253,6 +2351,7 @@ export class BookingsService {
       }
     }
 
+    // side-effects: notifications
     const clientNotificationMessage = await this.i18n.translate(
       'notification.disputeResolvedClient',
       locale,
@@ -2287,3 +2386,4 @@ export class BookingsService {
     return updatedBooking;
   }
 }
+
