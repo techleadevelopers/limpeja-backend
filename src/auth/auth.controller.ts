@@ -19,13 +19,25 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { LocalAuthGuard } from '../auth/guards/local-auth.guard';
 import { User } from '@prisma/client';
 import { Request as ExpressRequest } from 'express';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 
 type AuthenticatedRequest = ExpressRequest & { user?: User };
+const maskEmail = (email?: string) => {
+  if (!email) {
+    return 'unknown';
+  }
+  const [local, domain] = email.split('@');
+  if (!domain) {
+    return '***@hidden';
+  }
+  const maskedLocal =
+    local.length <= 2 ? `${local[0]}*` : `${local[0]}${'*'.repeat(local.length - 2)}${local.slice(-1)}`;
+  return `${maskedLocal}@${domain}`;
+};
 // import { ThrottlerGuard } from '@nestjs/throttler'; // Importe se estiver usando Throttler
 
 @ApiTags('auth')
 @Controller('auth')
-// @UseGuards(ThrottlerGuard) // Aplicar rate limiting a todas as rotas do controlador
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
@@ -71,9 +83,9 @@ export class AuthController {
   }
 
   // Existing login (email/password) - Mantido
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(ThrottlerGuard, LocalAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60 } })
   @Post('login')
-  // @UseGuards(ThrottlerGuard) // Pode aplicar rate limiting apenas a esta rota
   @ApiOperation({ summary: 'Login de usuário/provedor (Email/Senha)' })
   @ApiResponse({
     status: 200,
@@ -87,13 +99,15 @@ export class AuthController {
       throw new UnauthorizedException('Usuário não encontrado na requisição.');
     }
     this.logger.log(
-      `[AuthController] login: Recebida solicitação de login para usuário: ${user.email}`,
+    `[AuthController] login: tentativa recebida para userId=${user.id}`,
     );
     return this.authService.login(user);
   }
 
   // Existing forgot-password - Mantido
   @Post('forgot-password')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 3, ttl: 60 } })
   // @UseGuards(ThrottlerGuard) // Pode aplicar rate limiting apenas a esta rota
   @ApiOperation({ summary: 'Solicitar redefinição de senha' })
   @ApiResponse({
@@ -106,7 +120,9 @@ export class AuthController {
     @Body() forgotPasswordDto: ForgotPasswordDto,
   ): Promise<MessageResponseDto> {
     this.logger.log(
-      `[AuthController] forgotPassword: Recebida solicitação de redefinição de senha para email: ${forgotPasswordDto.email}`,
+      `[AuthController] forgotPassword request for email=${maskEmail(
+        forgotPasswordDto.email,
+      )}`,
     );
     await this.authService.forgotPassword(forgotPasswordDto.email);
     return {
