@@ -51,6 +51,8 @@ import { OfferDetailsDto } from '../offers/dto/offer-details.dto'; // Verifique 
 import { ProviderMetricsDto } from './dto/provider-metrics.dto';
 import { SettingsService } from '../settings/settings.service';
 import { ProviderSettingsDto } from './dto/provider-settings.dto';
+import { ProviderPromotionsService } from './provider-promotions.service';
+import { ProviderPromotionsCenterViewDto } from './dto/provider-promotions-center.dto';
 
 type RequestWithUser = ExpressRequest & {
   user?: {
@@ -67,6 +69,7 @@ export class ProvidersController {
   constructor(
     private readonly providersService: ProvidersService,
     private readonly settingsService: SettingsService,
+    private readonly promotionsService: ProviderPromotionsService,
   ) {}
 
   // =================================================================================================
@@ -543,6 +546,26 @@ export class ProvidersController {
       15,
     );
     return { serviceRadiusKm };
+  }
+
+  @Get('promotions-center')
+  @Roles(UserRole.PROVIDER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Centro de promoções e fidelidade para o provedor autenticado',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Dados agregados de cupons, missões, loyalty e ganhos.',
+    type: ProviderPromotionsCenterViewDto,
+  })
+  async getPromotionsCenter(@Req() req: RequestWithUser) {
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new BadRequestException('Usuário não autenticado.');
+    }
+    return this.promotionsService.getPromotionsCenter(userId);
   }
 
   // ADMIN: Atualizar perfil de um provedor por ID
