@@ -5,7 +5,6 @@
     "test",
     "dist",
     "**/*spec.ts",
-    "src/payments/payments.controller.ts",
-    "src/src/**/*" // Evita compilar a árvore duplicada src/src
+    "src/payments/payments.controller.ts"
   ]
 }
