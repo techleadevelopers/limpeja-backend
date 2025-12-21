@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe, BadRequestException } from '@nestjs/common';
+import { Logger, ValidationPipe, BadRequestException } from '@nestjs/common';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -44,6 +44,7 @@ async function bootstrap() {
   const sentryDsn = configService.get<string>('SENTRY_DSN');
   const nodeEnv = configService.get<string>('NODE_ENV') || 'development';
   const isProd = nodeEnv === 'production';
+  const webhookLogger = new Logger('WebhookParser');
 
   // ===== SENTRY =====
   if (sentryDsn) {
@@ -63,7 +64,10 @@ async function bootstrap() {
   //        WEBHOOK PIX - RAW BODY (SEM SEGURANÇA)
   // =======================================================
   app.use((req: any, res, next) => {
-    if (req.originalUrl.includes('/payments/webhook/pix')) {
+    if (
+      req.originalUrl.includes('/payments/webhook/pix') ||
+      req.originalUrl.includes('/payouts/webhook/gateway')
+    ) {
       req.setEncoding('utf8');
       let data = '';
 
@@ -76,10 +80,40 @@ async function bootstrap() {
 
         try {
           req.body = JSON.parse(data);
-          console.log('[Webhook PIX] JSON parseado com sucesso');
+          webhookLogger.debug('[Webhook PIX] raw payload parsed');
         } catch (err) {
           req.body = data;
-          console.error('[Webhook PIX] JSON inválido → usando string bruta');
+          webhookLogger.error('[Webhook PIX] invalid JSON payload, using raw string', typeof err === 'object' && err !== null ? err.toString() : 'unknown error');
+        }
+
+        return next();
+      });
+    } else {
+      return next();
+    }
+  });
+
+  // =======================================================
+  //        WEBHOOK PSP - RAW BODY PARA ASSINATURA PAGSEGURO
+  // =======================================================
+  app.use((req: any, res, next) => {
+    if (req.originalUrl.includes('/payouts/webhook/gateway')) {
+      req.setEncoding('utf8');
+      let data = '';
+
+      req.on('data', (chunk) => {
+        data += chunk;
+      });
+
+      req.on('end', () => {
+        req.rawBody = data;
+
+        try {
+          req.body = JSON.parse(data);
+          webhookLogger.debug('[Webhook PSP] raw payload parsed');
+        } catch (err) {
+          req.body = data;
+          webhookLogger.error('[Webhook PSP] invalid JSON payload, using raw string', typeof err === 'object' && err !== null ? err.toString() : 'unknown error');
         }
 
         return next();
@@ -91,7 +125,10 @@ async function bootstrap() {
 
   // Evitar que o JSON parser sobrescreva o webhook PIX
   app.use((req: any, res, next) => {
-    if (req.originalUrl.includes('/payments/webhook/pix')) {
+    if (
+      req.originalUrl.includes('/payments/webhook/pix') ||
+      req.originalUrl.includes('/payouts/webhook/gateway')
+    ) {
       return next();
     }
     return json({ limit: '10mb' })(req, res, next);
