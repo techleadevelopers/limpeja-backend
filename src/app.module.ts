@@ -21,6 +21,7 @@ import { ChatModule } from './chat/chat.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OffersModule } from './offers/offers.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ProviderPromotionsModule } from './provider-promotions/provider-promotions.module';
 import { SearchModule } from './search/search.module';
 import { VerificationModule } from './verification/verification.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -103,6 +104,7 @@ import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
     AuthModule,
     UsersModule,
     forwardRef(() => ProvidersModule),
+    ProviderPromotionsModule,
     ClientsModule,
     ServicesModule,
     ProviderServicesModule,
