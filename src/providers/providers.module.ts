@@ -23,7 +23,7 @@ import { ProviderPromotionsService } from './provider-promotions.service';
     SettingsModule,
     MissionsModule,
     LoyaltyModule,
-    EarningsModule,
+    forwardRef(() => EarningsModule),
   ],
   controllers: [ProvidersController],
   providers: [ProvidersService, ProviderPromotionsService],
