@@ -105,11 +105,4 @@ export class SubscriptionsController {
     );
   }
 
-  // Internal endpoint, possibly for admin or triggered by a webhook/scheduled job
-  // Not exposed to general users
-  // @Post(':subscriptionId/generate-next-booking')
-  // @Roles(UserRole.ADMIN) // Or internal API key guard
-  // async generateNextBooking(@Param('subscriptionId') subscriptionId: string) {
-  //   return this.subscriptionsService.generateRecurringBooking(subscriptionId);
-  // }
 }
