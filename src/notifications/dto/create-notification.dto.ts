@@ -6,7 +6,9 @@ import {
   IsUUID,
   IsOptional,
   IsObject,
-} from 'class-validator'; // Added IsObject
+  IsISO8601,
+  IsInt,
+} from 'class-validator'; // Added IsObject, IsISO8601
 
 export class CreateNotificationDto {
   @ApiProperty({
@@ -80,4 +82,54 @@ export class CreateNotificationDto {
   @IsOptional()
   @IsString()
   category?: string; // NEW: Added category for better filtering/UI handling
+
+  @ApiPropertyOptional({
+    description: 'Chave idempotente para evitar duplicação em webhooks/queues',
+    example: 'payment_confirmed:booking-123',
+  })
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
+
+  @ApiPropertyOptional({
+    description: 'Chave de deduplicação do AppEvent (ex: type:bookingId:userId)',
+    example: 'BOOKING_UPDATED:booking-123:client-456',
+  })
+  @IsOptional()
+  @IsString()
+  dedupeKey?: string;
+
+  @ApiPropertyOptional({
+    description: 'Identificador de entidade relacionada (bookingId, messageId, etc.)',
+    example: 'booking-123',
+  })
+  @IsOptional()
+  @IsString()
+  relatedId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Carga adicional de metadados (payload do AppEvent)',
+    type: 'object',
+    example: { bookingId: 'booking-123', channel: 'chat' },
+    additionalProperties: true,
+  })
+  @IsOptional()
+  @IsObject()
+  payload?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    description: 'TTL em segundos do AppEvent (para stream/fallback)',
+    example: 300,
+  })
+  @IsOptional()
+  @IsInt()
+  ttlSeconds?: number;
+
+  @ApiPropertyOptional({
+    description: 'Data/hora do serviço confirmado (ex: para banners e filtros)',
+    example: '2025-12-25T14:30:00.000Z',
+  })
+  @IsOptional()
+  @IsISO8601()
+  scheduledAt?: string;
 }

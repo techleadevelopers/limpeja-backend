@@ -19,6 +19,7 @@ import { BookingsModule } from './bookings/bookings.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { ChatModule } from './chat/chat.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SchedulerModule } from './scheduler/scheduler.module';
 import { OffersModule } from './offers/offers.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ProviderPromotionsModule } from './provider-promotions/provider-promotions.module';
@@ -29,12 +30,14 @@ import { EarningsModule } from './earnings/earnings.module';
 import { FaqsModule } from './faqs/faqs.module';
 import { CacheModule } from './cache/cache.module';
 import { ReferralsModule } from './referrals/referrals.module';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SafetyModule } from './safety/safety.module';
 import { CouponsModule } from './coupons/coupons.module';
 import { GuaranteeModule } from './guarantee/guarantee.module';
+import { InsuranceModule } from './insurance/insurance.module';
+import { IncidentsModule } from './incidents/incidents.module';
 import { PricingModule } from './pricing/pricing.module';
 import { PayoutsModule } from './payouts/payouts.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
@@ -62,6 +65,7 @@ import { DisputeModule } from './disputes/dispute.module';
 import { LocksModule } from './common/locks/locks.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { SupportModule } from './support/support.module';
+import { MetaModule } from './meta/meta.module';
 
 // Admin
 import { AdminModule } from './admin/admin.module';
@@ -71,6 +75,8 @@ import { QueuesModule } from './queues/queues.module';
 import { HealthModule } from './health/health.module';
 import { HttpMetricsMiddleware } from './common/middleware/http-metrics.middleware';
 import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
+import { ConfigController } from './config/config.controller';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -113,6 +119,7 @@ import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
     ReviewsModule,
     ChatModule,
     NotificationsModule,
+    SchedulerModule,
     OffersModule,
     PaymentsModule,
     SearchModule,
@@ -125,8 +132,10 @@ import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
     ReferralsModule,
     SubscriptionsModule,
     SafetyModule,
+    IncidentsModule,
     CouponsModule,
     GuaranteeModule,
+    InsuranceModule,
     PricingModule,
     GeocodingModule,
     LoyaltyModule,
@@ -137,14 +146,22 @@ import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
     LocksModule,
     MetricsModule,
     SupportModule,
+    MetaModule,
     AnalyticsModule,
     SettingsModule,
     UploadModule,
     ConnectModule,
     HealthModule,
   ],
-  controllers: [AppController],
-  providers: [AppService, TracingInterceptor],
+  controllers: [AppController, ConfigController],
+  providers: [
+    AppService,
+    TracingInterceptor,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

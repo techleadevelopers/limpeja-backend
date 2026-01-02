@@ -255,7 +255,8 @@ export class UserProfileDto {
 
           durationMinutes: ps.durationMinutes ?? null,
           description: ps.description ?? null,
-          pricingType: ps.pricingType,
+          pricingType: ps.pricingType ?? PricingType.HOURLY,
+          needsReview: ps.needsReview ?? false,
 
           service,
         };
@@ -313,6 +314,9 @@ export class UserProfileDto {
       const livenessResult = (providerExtras.livenessResult ??
         null) as Prisma.JsonValue | null;
 
+      const providerCompletedBookingsCount =
+        user.provider.bookings?.length ?? 0;
+
       const calculatedProvider: ProviderWithCalculatedRating = {
         ...user.provider,
         dateOfBirth: dateOfBirthString,
@@ -322,6 +326,7 @@ export class UserProfileDto {
         email: user.email,
         averageRating,
         reviewCount,
+        completedBookingsCount: providerCompletedBookingsCount,
         pixKey: user.provider.pixKey ?? null,
         pixKeyMasked: user.provider.pixKeyMasked ?? null,
         documentPhotoFrontUrl,

@@ -9,8 +9,11 @@ import {
   forwardRef,
   Inject,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { BookingQuoteRequestDto } from './dto/quote-request.dto';
+import { BookingQuoteResponseDto } from './dto/quote-response.dto';
 import {
   MIN_HOURLY_MINUTES,
   COMMISSION_RATE,
@@ -19,12 +22,16 @@ import {
   Booking,
   BookingStatus,
   PaymentIntentStatus,
+  ProviderService,
   UserRole,
   Prisma,
   LedgerEntryType,
+  VerificationStatus,
+  BookingProofType,
 } from '@prisma/client';
 import { ClientsService } from '../clients/clients.service';
 import { ProvidersService } from '../providers/providers.service';
+import { ProviderWithCalculatedRating } from '../providers/providers.service';
 import { ProviderServicesService } from '../provider-services/provider-services.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -35,6 +42,21 @@ import { ReportDisputeDto } from './dto/report-dispute.dto';
 import { QueuesService } from '../queues/queues.service';
 import { PricingService } from '../pricing/pricing.service';
 import { CouponsService } from '../coupons/coupons.service';
+import { InsurancePlanId } from '../insurance/insurance.constants';
+import { InsuranceService } from '../insurance/insurance.service';
+import { BLOCKED_BOOKING_STATUSES } from './bookings.constants';
+import { calculateServiceTotalPrice } from './pricing/price-calculator';
+import { CreateAddressDto } from '../common/dto/create-address.dto';
+import { BOOKING_STATUS_TRANSITIONS } from './booking-status.constants';
+import {
+  calculateExpectedEnd,
+  calculateScheduledAtInSaoPaulo,
+} from './booking-time.utils';
+import {
+  BookingAction,
+  BookingActionContext,
+  getAllowedBookingActions,
+} from './booking-actions.helper';
 
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { LoyaltyTransactionType } from '@prisma/client';
@@ -45,6 +67,23 @@ import { I18nService } from '../common/i18n/i18n.service';
 import { Request } from 'express';
 
 import { RedisLockService } from '../common/locks/redis-lock.service';
+import { CacheService } from '../cache/cache.service';
+import { SchedulerService } from '../scheduler/scheduler.service';
+import { BusinessRuleError } from '../common/errors/business-rule.error';
+
+export const IDEMPOTENCY_TTL_SECONDS = 10 * 60;
+
+const WEEKLY_COUNTABLE_STATUSES: BookingStatus[] = [
+  BookingStatus.CONFIRMED,
+  BookingStatus.STARTED,
+  BookingStatus.FINISHED,
+];
+
+const WEEKLY_BOOKING_LIMIT = 2;
+const WEEKLY_LOCK_TTL_MS = 3_000;
+const WEEKLY_LOCK_BUSY_ERROR = 'BOOKING_LOCK_BUSY';
+const WEEKLY_LIMIT_ERROR_MESSAGE =
+  'A Regra dos 2 dias impede mais de duas diarias por semana com o mesmo provedor.';
 
 const DEFAULT_BOOKING_DETAILS_INCLUDE = {
   client: { include: { user: true } },
@@ -57,64 +96,75 @@ const DEFAULT_BOOKING_DETAILS_INCLUDE = {
   guaranteeClaims: true,
   coupon: true,
   paymentIntent: true,
+  bookingInsurance: true,
+  bookingProofs: true,
 } satisfies Prisma.BookingInclude;
+
+const QUOTE_HASH_VERSION = process.env.BOOKING_QUOTE_HASH_VERSION ?? '1';
+const QUOTE_EXPIRATION_MS =
+  Number(process.env.BOOKING_QUOTE_TTL_MS ?? 10 * 60 * 1000) ||
+  10 * 60 * 1000;
 
 export type BookingWithDetailsRelations = Prisma.BookingGetPayload<{
   include: typeof DEFAULT_BOOKING_DETAILS_INCLUDE;
 }>;
 
-const BOOKING_STATUS_TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
-  [BookingStatus.PENDING]: [
-    BookingStatus.CONFIRMED,
-    BookingStatus.REJECTED,
-    BookingStatus.CANCELED,
-    BookingStatus.PENDING_DISPUTE,
-  ],
-  [BookingStatus.PENDING_PROVIDER_CONFIRMATION]: [
-    BookingStatus.CONFIRMED,
-    BookingStatus.REJECTED,
-    BookingStatus.CANCELED,
-    BookingStatus.PENDING_DISPUTE,
-  ],
-  [BookingStatus.CONFIRMED]: [
-    BookingStatus.ON_THE_WAY,
-    BookingStatus.ARRIVED,
-    BookingStatus.STARTED,
-    BookingStatus.FINISHED,
-    BookingStatus.CANCELED,
-    BookingStatus.RESCHEDULED,
-    BookingStatus.PENDING_DISPUTE,
-  ],
-  [BookingStatus.ON_THE_WAY]: [
-    BookingStatus.ARRIVED,
-    BookingStatus.CANCELED,
-    BookingStatus.PENDING_DISPUTE,
-  ],
-  [BookingStatus.ARRIVED]: [
-    BookingStatus.STARTED,
-    BookingStatus.CANCELED,
-    BookingStatus.PENDING_DISPUTE,
-  ],
-  [BookingStatus.STARTED]: [
-    BookingStatus.FINISHED,
-    BookingStatus.CANCELED,
-    BookingStatus.PENDING_DISPUTE,
-  ],
-  [BookingStatus.RESCHEDULED]: [
-    BookingStatus.CONFIRMED,
-    BookingStatus.CANCELED,
-    BookingStatus.PENDING_DISPUTE,
-  ],
-  [BookingStatus.PENDING_DISPUTE]: [
-    BookingStatus.FINISHED,
-    BookingStatus.CANCELED,
-    BookingStatus.NO_SHOW,
-  ],
-  [BookingStatus.FINISHED]: [],
-  [BookingStatus.CANCELED]: [],
-  [BookingStatus.REJECTED]: [],
-  [BookingStatus.NO_SHOW]: [],
+export type BookingWithAllowedActions = BookingWithDetailsRelations & {
+  allowedActions: BookingAction[];
 };
+
+interface QuoteHashPayload {
+  providerId: string;
+  providerServiceId: string;
+  serviceId?: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  durationMinutes?: number | null;
+  couponCode?: string | null;
+  subscriptionId?: string | null;
+  addons?: Array<{ id: string; quantity?: number }>;
+  address: {
+    latitude: number;
+    longitude: number;
+    city?: string | null;
+    state?: string | null;
+    cep?: string | null;
+  };
+  minHourlyMinutes: number;
+  version: string;
+  insurancePlanId?: InsurancePlanId | null;
+}
+
+interface BookingQuoteCalculationOptions {
+  clientId: string;
+  clientUserId: string;
+  provider: ProviderWithCalculatedRating;
+  providerService: ProviderService;
+  createBookingDto: CreateBookingDto;
+  locale: string;
+  clientCompletedBookingsCount: number;
+  subscriptionId?: string;
+  addons?: Array<{ id: string; quantity?: number }>;
+  insurancePlanId?: InsurancePlanId | null;
+}
+
+interface BookingQuoteCalculationResult {
+  finalPrice: Prisma.Decimal;
+  subtotal: Prisma.Decimal;
+  discountAmount: Prisma.Decimal;
+  couponId: string | null;
+  normalizedRequestedDurationMinutes?: number;
+  quoteHash: string;
+  quoteId: string;
+  quoteResponse: BookingQuoteResponseDto;
+}
+
+interface BookingProofPayload {
+  photos: string[];
+  videoUrl?: string | null;
+  hashes?: Record<string, unknown> | null;
+  timestamps?: Record<string, unknown> | null;
+}
 
 @Injectable()
 export class BookingsService {
@@ -129,6 +179,7 @@ export class BookingsService {
     private queuesService: QueuesService,
     private pricingService: PricingService,
     private couponsService: CouponsService,
+    private insuranceService: InsuranceService,
     private loyaltyService: LoyaltyService,
     @Inject(forwardRef(() => PaymentsService))
     private paymentsService: PaymentsService,
@@ -140,18 +191,40 @@ export class BookingsService {
 
     private readonly i18n: I18nService,
     private readonly redisLockService: RedisLockService,
+    private readonly cacheService: CacheService,
+    private readonly schedulerService: SchedulerService,
   ) {}
 
   private getExpectedEnd(booking: Booking): Date {
-    const base =
-      booking.startedAt ||
-      booking.scheduledStart ||
-      this.getScheduledAtInSaoPaulo(
-        booking.scheduledDate,
-        booking.scheduledTime,
-      );
-    const dur = booking.durationMinutes ?? 60;
-    return new Date(base.getTime() + dur * 60 * 1000);
+    return calculateExpectedEnd({
+      scheduledDate: booking.scheduledDate,
+      scheduledTime: booking.scheduledTime,
+      scheduledStart: booking.scheduledStart,
+      startedAt: booking.startedAt,
+      durationMinutes: booking.durationMinutes,
+    });
+  }
+
+  private buildIdempotencyCacheKey(key: string): string {
+    return `idempo:bookings:create:${key}`;
+  }
+
+  private extractIdempotencyKey(request?: Request): string | undefined {
+    if (!request) {
+      return undefined;
+    }
+    const rawHeader =
+      request.headers['idempotency-key'] ??
+      request.headers['Idempotency-Key'];
+    if (!rawHeader) {
+      return undefined;
+    }
+    const value = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : undefined;
   }
 
   // =========================
@@ -235,6 +308,138 @@ export class BookingsService {
     return guess;
   }
 
+  private formatDateToYyyyMmDd(date: Date): string {
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private getSaoPauloWeekRange(date: Date) {
+    const offsetMinutes = this.tzOffsetMinutes(
+      date,
+      'America/Sao_Paulo',
+    );
+    const localTimestamp = date.getTime() + offsetMinutes * 60_000;
+    const localDate = new Date(localTimestamp);
+    const diffToMonday = (localDate.getUTCDay() + 6) % 7;
+
+    const weekStartLocalDate = new Date(
+      Date.UTC(
+        localDate.getUTCFullYear(),
+        localDate.getUTCMonth(),
+        localDate.getUTCDate() - diffToMonday,
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+
+    const nextWeekLocalDate = new Date(weekStartLocalDate);
+    nextWeekLocalDate.setUTCDate(nextWeekLocalDate.getUTCDate() + 7);
+
+    const weekStart = this.getScheduledAtInSaoPaulo(
+      this.formatDateToYyyyMmDd(weekStartLocalDate),
+      '00:00',
+    );
+
+    const nextWeekStart = this.getScheduledAtInSaoPaulo(
+      this.formatDateToYyyyMmDd(nextWeekLocalDate),
+      '00:00',
+    );
+
+    return {
+      weekStart,
+      weekEnd: new Date(nextWeekStart.getTime() - 1),
+    };
+  }
+
+  private async countWeeklyBookings(
+    clientId: string,
+    providerId: string,
+    weekStart: Date,
+    weekEnd: Date,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number> {
+    const prismaClient = tx ?? this.prisma;
+    return prismaClient.booking.count({
+      where: {
+        clientId,
+        providerId,
+        scheduledStart: { gte: weekStart },
+        scheduledEnd: { lte: weekEnd },
+        status: {
+          in: WEEKLY_COUNTABLE_STATUSES,
+        },
+      },
+    });
+  }
+
+  private async ensureWeeklyLimit(
+    clientId: string,
+    providerId: string,
+    weekStart: Date,
+    weekEnd: Date,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const weeklyBookingsCount = await this.countWeeklyBookings(
+      clientId,
+      providerId,
+      weekStart,
+      weekEnd,
+      tx,
+    );
+    if (weeklyBookingsCount >= WEEKLY_BOOKING_LIMIT) {
+      this.logger.warn(
+        `[BookingsService] weekly limit violation for clientId=${clientId} providerId=${providerId} (${weekStart.toISOString()} - ${weekEnd.toISOString()}) (${weeklyBookingsCount} existing bookings)`,
+      );
+      throw new BusinessRuleError(WEEKLY_LIMIT_ERROR_MESSAGE);
+    }
+  }
+
+  private buildWeeklyLockKey(
+    clientId: string,
+    providerId: string,
+    weekStart: Date,
+  ): string {
+    return `booking:weekly:${clientId}:${providerId}:${weekStart.toISOString()}`;
+  }
+
+  private buildWeeklyLockValue(
+    clientId: string,
+    providerId: string,
+    weekStart: Date,
+  ): string {
+    return `${clientId}:${providerId}:${weekStart.getTime()}:${Date.now()}`;
+  }
+
+  private async runWithWeeklyLock<T>(
+    clientId: string,
+    providerId: string,
+    weekStart: Date,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const lockKey = this.buildWeeklyLockKey(clientId, providerId, weekStart);
+    const lockValue = this.buildWeeklyLockValue(clientId, providerId, weekStart);
+    const lockAcquired = await this.redisLockService.acquireLock(
+      lockKey,
+      lockValue,
+      WEEKLY_LOCK_TTL_MS,
+    );
+    if (!lockAcquired) {
+      this.logger.warn(`[BookingsService] weekly lock busy: ${lockKey}`);
+      throw new BusinessRuleError(WEEKLY_LOCK_BUSY_ERROR);
+    }
+    try {
+      this.logger.debug(`[BookingsService] weekly lock acquired: ${lockKey}`);
+      return await work();
+    } finally {
+      await this.redisLockService.releaseLock(lockKey, lockValue);
+      this.logger.debug(`[BookingsService] weekly lock released: ${lockKey}`);
+    }
+  }
+
   private getBookingInclude(
     include?: Prisma.BookingInclude,
   ): Prisma.BookingInclude {
@@ -256,6 +461,103 @@ export class BookingsService {
       );
     }
     return booking as unknown as BookingWithDetailsRelations;
+  }
+
+  private async ensureProofRecorded(
+    bookingId: string,
+    type: BookingProofType,
+  ) {
+    const proof = await this.prisma.bookingProof.findUnique({
+      where: {
+        bookingId_type: {
+          bookingId,
+          type,
+        },
+      },
+    });
+    if (!proof) {
+      throw new BadRequestException('proof-required');
+    }
+    return proof;
+  }
+
+  async submitProof(
+    bookingId: string,
+    providerUserId: string,
+    type: BookingProofType,
+    payload: BookingProofPayload,
+  ) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        provider: { include: { user: true } },
+        bookingInsurance: true,
+        bookingProofs: true,
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking nao encontrado.');
+    }
+    if (booking.provider?.userId !== providerUserId) {
+      throw new ForbiddenException('Somente o prestador pode enviar comprovantes.');
+    }
+
+    if (!payload.photos || payload.photos.length === 0) {
+      throw new BadRequestException('Pelo menos uma foto é obrigatória.');
+    }
+
+    const requiresVideo =
+      type === BookingProofType.CHECKOUT &&
+      ['PREMIUM', 'TOTAL'].includes(booking.bookingInsurance?.planId ?? '');
+    if (requiresVideo && !payload.videoUrl?.trim()) {
+      throw new BadRequestException('checkout-proof-video-required');
+    }
+
+    try {
+      const proof = await this.prisma.bookingProof.create({
+        data: {
+          bookingId,
+          userId: providerUserId,
+          type,
+          photos: payload.photos,
+          videoUrl: payload.videoUrl ?? null,
+          hashes: payload.hashes
+            ? (payload.hashes as Prisma.InputJsonValue)
+            : null,
+          timestamps: payload.timestamps
+            ? (payload.timestamps as Prisma.InputJsonValue)
+            : null,
+        },
+      });
+      return proof;
+    } catch (error: any) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException('Comprovante já enviado.');
+      }
+      throw error;
+    }
+  }
+
+  public withAllowedActions(
+    booking: BookingWithDetailsRelations,
+    role: UserRole,
+    _actorUserId?: string,
+  ): BookingWithAllowedActions {
+    const context: BookingActionContext = {
+      status: booking.status,
+      scheduledDate: booking.scheduledDate,
+      scheduledTime: booking.scheduledTime,
+      scheduledStart: booking.scheduledStart,
+      startedAt: booking.startedAt,
+      durationMinutes: booking.durationMinutes,
+      paymentIntentStatus: booking.paymentIntent?.status ?? null,
+    };
+    const allowedActions = getAllowedBookingActions(context, role);
+    return { ...booking, allowedActions };
   }
 
   private assertValidBookingTransition(
@@ -376,6 +678,24 @@ export class BookingsService {
 
     const locale = (request as any)?.locale || 'pt-BR';
 
+    const idempotencyKey = this.extractIdempotencyKey(request);
+    const idempotencyNodeKey = idempotencyKey
+      ? this.buildIdempotencyCacheKey(idempotencyKey)
+      : undefined;
+
+    if (idempotencyNodeKey) {
+      const cachedBooking =
+        await this.cacheService.get<BookingWithDetailsRelations>(
+          idempotencyNodeKey,
+        );
+      if (cachedBooking) {
+        this.logger.log(
+          `[BookingsService] create - Idempotency cache hit for key ${idempotencyKey}`,
+        );
+        return cachedBooking;
+      }
+    }
+
     const lockKey = `booking:creation:${clientUserId}:${createBookingDto.providerId}:${createBookingDto.scheduledDate}:${createBookingDto.scheduledTime}`;
     const lockValue = `${clientUserId}_${Date.now()}`;
     const ttlMs = 15000;
@@ -433,6 +753,13 @@ export class BookingsService {
         `[BookingsService] create - Provedor encontrado: ${provider.id}`,
       );
 
+      if (provider.verificationStatus !== VerificationStatus.APPROVED) {
+        this.logger.warn(
+          `[BookingsService] create - Provedor ${provider.id} nao esta aprovado.`,
+        );
+        throw new ForbiddenException('provider-not-approved');
+      }
+
       const providerService = await this.providerServicesService.findOne(
         createBookingDto.providerServiceId,
         createBookingDto.providerId,
@@ -449,117 +776,43 @@ export class BookingsService {
         );
       }
 
-      // --- Lógica de cálculo de totalPrice baseada no PricingType ---
-      let calculatedTotalPrice: Prisma.Decimal;
-      switch (providerService.pricingType) {
-        case 'FIXED_PRICE':
-          calculatedTotalPrice = providerService.price;
-          break;
-        case 'HOURLY':
-          if (
-            !createBookingDto.requestedDurationMinutes ||
-            createBookingDto.requestedDurationMinutes <= 0
-          ) {
-            const serviceDefaultDuration = (providerService as any)
-              .durationMinutes as number | null | undefined;
-            if (serviceDefaultDuration && serviceDefaultDuration > 0) {
-              this.logger.log(
-                `[BookingsService] create - Aplicando fallback de durationMinutes do serviço HOURLY: ${serviceDefaultDuration} minutos.`,
-              );
-              createBookingDto.requestedDurationMinutes =
-                serviceDefaultDuration;
-            }
-          }
+      const priceQuote = await this.calculateQuoteForBooking({
+        clientId: client.id,
+        clientUserId,
+        provider,
+        providerService,
+        createBookingDto,
+        locale,
+        clientCompletedBookingsCount: client.completedBookingsCount ?? 0,
+        subscriptionId: createBookingDto.subscriptionId,
+        addons: createBookingDto.addons,
+        insurancePlanId: createBookingDto.insurancePlanId ?? null,
+      });
 
-          if (!createBookingDto.requestedDurationMinutes) {
-            throw new BadRequestException(
-              await this.i18n.translate(
-                'booking.badRequest.durationRequired',
-                locale,
-              ),
-            );
-          }
-
-          const normalizedDuration = Math.max(
-            createBookingDto.requestedDurationMinutes,
-            MIN_HOURLY_MINUTES,
-          );
-          if (
-            normalizedDuration !== createBookingDto.requestedDurationMinutes
-          ) {
-            this.logger.log(
-              `[BookingsService] create - Normalizando duração mínima para HOURLY: ${normalizedDuration} minutos.`,
-            );
-            createBookingDto.requestedDurationMinutes = normalizedDuration;
-          }
-
-          const hourlyBase =
-            providerService.pricePerHour ?? providerService.price;
-          if (!hourlyBase) {
-            throw new BadRequestException(
-              'Preço por hora não configurado para este serviço.',
-            );
-          }
-
-          calculatedTotalPrice = hourlyBase.mul(
-            new Prisma.Decimal(createBookingDto.requestedDurationMinutes).div(
-              new Prisma.Decimal(60),
-            ),
-          );
-          break;
-        case 'BY_SIZE':
-          if (
-            createBookingDto.requestedSquareMeters &&
-            providerService.pricePerSquareMeter
-          ) {
-            calculatedTotalPrice = providerService.pricePerSquareMeter.mul(
-              new Prisma.Decimal(createBookingDto.requestedSquareMeters),
-            );
-          } else if (
-            createBookingDto.requestedRoomCount &&
-            providerService.pricePerRoom
-          ) {
-            calculatedTotalPrice = providerService.pricePerRoom.mul(
-              new Prisma.Decimal(createBookingDto.requestedRoomCount),
-            );
-          } else {
-            throw new BadRequestException(
-              await this.i18n.translate(
-                'booking.badRequest.sizeOrRoomsRequired',
-                locale,
-              ),
-            );
-          }
-          break;
-        default:
-          calculatedTotalPrice = new Prisma.Decimal(
-            createBookingDto.totalPrice,
-          );
-          this.logger.warn(
-            `[BookingsService] create - Tipo de precificação desconhecido ou não implementado: ${providerService.pricingType}. Usando totalPrice do DTO.`,
-          );
-          break;
+      if (
+        createBookingDto.quoteHash &&
+        createBookingDto.quoteHash !== priceQuote.quoteHash
+      ) {
+        throw new ConflictException({
+          message: 'PRICE_MISMATCH',
+          quote: priceQuote.quoteResponse,
+        });
       }
-      if (calculatedTotalPrice.lessThan(0)) {
-        throw new BadRequestException(
-          await this.i18n.translate('booking.badRequest.negativePrice', locale),
+
+      const calculatedTotalPrice = priceQuote.finalPrice;
+      const discountAmount = priceQuote.discountAmount;
+      const couponId = priceQuote.couponId;
+      const selectedInsurance = priceQuote.quoteResponse.selectedInsurance;
+      if (createBookingDto.insurancePlanId && !selectedInsurance) {
+        this.logger.warn(
+          `[BookingsService] create - Plano de seguro solicitado (${createBookingDto.insurancePlanId}) não é elegível.`,
         );
+        throw new BadRequestException('insurance-plan-not-eligible');
       }
+
       this.logger.log(
         `[BookingsService] create - Serviço do provedor encontrado: ${providerService.id}. Preço calculado: ${calculatedTotalPrice.toFixed(2)}`,
       );
-
-      // NEW: Apply dynamic pricing
-      const { finalPrice: dynamicFinalPrice } =
-        await this.pricingService.calculatePrice({
-          serviceId: providerService.serviceId,
-          providerId: provider.id,
-          latitude: createBookingDto.address.latitude,
-          longitude: createBookingDto.address.longitude,
-          scheduledDate: createBookingDto.scheduledDate,
-          cityCode: createBookingDto.address?.city,
-        });
-      calculatedTotalPrice = new Prisma.Decimal(dynamicFinalPrice);
 
       // scheduledStart/scheduledEnd (TZ-safe)
       const scheduledStart = this.getScheduledAtInSaoPaulo(
@@ -576,19 +829,13 @@ export class BookingsService {
         scheduledStart.getTime() + durationMinutes * 60_000,
       );
 
+      const { weekStart, weekEnd } = this.getSaoPauloWeekRange(scheduledStart);
       // ✅ overlap check (ANTES de criar address/booking e aplicar cupom)
       const overlap = await this.prisma.booking.findFirst({
         where: {
           providerId: provider.id,
           status: {
-            in: [
-              BookingStatus.PENDING,
-              BookingStatus.CONFIRMED,
-              BookingStatus.ON_THE_WAY,
-              BookingStatus.ARRIVED,
-              BookingStatus.STARTED,
-              BookingStatus.RESCHEDULED,
-            ],
+            in: BLOCKED_BOOKING_STATUSES,
           },
           scheduledStart: { lt: scheduledEnd },
           scheduledEnd: { gt: scheduledStart },
@@ -605,114 +852,97 @@ export class BookingsService {
         );
       }
 
-      // Cupom (mantendo compatibilidade + nomes claros)
-      let couponId: string | null = null;
-      let discountAmount: Prisma.Decimal = new Prisma.Decimal(0);
-      if (createBookingDto.couponCode) {
-        this.logger.log(
-          `[BookingsService] create - Tentando aplicar cupom: ${createBookingDto.couponCode}`,
-        );
 
-        const couponApplicationResult = await this.couponsService.applyCoupon(
-          createBookingDto.couponCode,
-          client.userId,
-          {
-            originalPrice: calculatedTotalPrice.toNumber(),
-            clientId: client.id,
-            providerId: provider.id,
-            scheduledDate: createBookingDto.scheduledDate,
-
-            // ✅ claros e corretos
-            serviceId: providerService.serviceId, // Service.id
-            providerServiceId: providerService.id, // ProviderService.id
-
-            // ✅ compat opcional se seu applyCoupon antigo “esperava” o Service.id num campo errado
-            legacyProviderServiceId: providerService.serviceId,
-          } as any,
-        );
-
-        if (couponApplicationResult.coupon) {
-          calculatedTotalPrice = new Prisma.Decimal(
-            couponApplicationResult.newTotalPrice,
-          );
-          couponId = couponApplicationResult.coupon.id;
-          discountAmount = new Prisma.Decimal(
-            couponApplicationResult.discountAmount,
-          );
-          this.logger.log(
-            `[BookingsService] create - Cupom ${createBookingDto.couponCode} aplicado. Novo preço: ${calculatedTotalPrice.toFixed(2)}`,
-          );
-        } else {
-          this.logger.warn(
-            `[BookingsService] create - Cupom ${createBookingDto.couponCode} não aplicável: ${couponApplicationResult.message}`,
-          );
-        }
-      }
+      const bookingInclude = this.getBookingInclude();
 
       try {
-        this.logger.log(
-          `[BookingsService] create - Criando novo endereço no DB.`,
+        const createdBooking = await this.runWithWeeklyLock(
+          client.id,
+          provider.id,
+          weekStart,
+          async () => {
+            return this.prisma.$transaction(async (tx) => {
+              await this.ensureWeeklyLimit(
+                client.id,
+                provider.id,
+                weekStart,
+                weekEnd,
+                tx,
+              );
+
+              this.logger.log(
+                `[BookingsService] create - Criando novo endereço no DB.`,
+              );
+              const newAddress = await tx.address.create({
+                data: {
+                  cep: createBookingDto.address.cep,
+                  street: createBookingDto.address.street,
+                  number: createBookingDto.address.number,
+                  complement: createBookingDto.address.complement,
+                  neighborhood: createBookingDto.address.neighborhood,
+                  city: createBookingDto.address.city,
+                  state: createBookingDto.address.state,
+                  latitude: Number(createBookingDto.address.latitude),
+                  longitude: Number(createBookingDto.address.longitude),
+                },
+              });
+              this.logger.log(
+                `[BookingsService] create - Novo endereço criado com ID: ${newAddress.id}`,
+              );
+
+              const booking = (await tx.booking.create({
+                data: {
+                  clientId: client.id,
+                  providerId: provider.id,
+                  providerServiceId: providerService.id,
+                  scheduledDate: new Date(
+                    `${createBookingDto.scheduledDate}T00:00:00.000Z`,
+                  ),
+                  scheduledTime: createBookingDto.scheduledTime,
+
+                  scheduledStart,
+                  durationMinutes,
+                  scheduledEnd,
+
+                  totalPrice: calculatedTotalPrice,
+                  notes: createBookingDto.notes,
+                  status: BookingStatus.PENDING,
+                  addressId: newAddress.id,
+                  couponId: couponId,
+                  discountAmount: discountAmount,
+                  couponUsage: couponId
+                    ? {
+                        create: {
+                          couponId: couponId,
+                          userId: clientUserId,
+                          appliedValue: discountAmount,
+                        },
+                      }
+                    : undefined,
+                  bookingInsurance: selectedInsurance
+                    ? {
+                        create: {
+                          planId: selectedInsurance.id,
+                          priceCents: selectedInsurance.finalPriceCents,
+                          coverageCents: selectedInsurance.coverageCents,
+                          deductibleCents: selectedInsurance.deductibleCents,
+                          riskMultiplierBps:
+                            selectedInsurance.riskMultiplierBps ?? 0,
+                          proofRequired:
+                            selectedInsurance.proofRequired ?? false,
+                        },
+                      }
+                    : undefined,
+                  subscriptionId: createBookingDto.subscriptionId,
+                },
+                include: bookingInclude,
+              })) as unknown as BookingWithDetailsRelations;
+
+              return booking;
+            });
+          },
         );
-        const newAddress = await this.prisma.address.create({
-          data: {
-            cep: createBookingDto.address.cep,
-            street: createBookingDto.address.street,
-            number: createBookingDto.address.number,
-            complement: createBookingDto.address.complement,
-            neighborhood: createBookingDto.address.neighborhood,
-            city: createBookingDto.address.city,
-            state: createBookingDto.address.state,
-            latitude: Number(createBookingDto.address.latitude),
-            longitude: Number(createBookingDto.address.longitude),
-          },
-        });
-        this.logger.log(
-          `[BookingsService] create - Novo endereço criado com ID: ${newAddress.id}`,
-        );
 
-        const createdBooking = await this.prisma.booking.create({
-          data: {
-            clientId: client.id,
-            providerId: provider.id,
-            providerServiceId: providerService.id,
-            scheduledDate: new Date(
-              `${createBookingDto.scheduledDate}T00:00:00.000Z`,
-            ),
-            scheduledTime: createBookingDto.scheduledTime,
-
-            scheduledStart,
-            durationMinutes,
-            scheduledEnd,
-
-            totalPrice: calculatedTotalPrice,
-            notes: createBookingDto.notes,
-            status: BookingStatus.PENDING,
-            addressId: newAddress.id,
-            couponId: couponId,
-            discountAmount: discountAmount,
-            couponUsage: couponId
-              ? {
-                  create: {
-                    couponId: couponId,
-                    userId: clientUserId,
-                    appliedValue: discountAmount,
-                  },
-                }
-              : undefined,
-          },
-          include: {
-            client: { include: { user: true } },
-            provider: { include: { user: true } },
-            providerService: { include: { service: true } },
-            review: true,
-            address: true,
-            subscription: true,
-            incidents: true,
-            guaranteeClaims: true,
-            coupon: true,
-            paymentIntent: true,
-          },
-        });
         this.logger.log(
           `[BookingsService] create - Agendamento criado com sucesso no DB. ID: ${createdBooking.id}. ProviderId no booking retornado pelo Prisma: ${createdBooking.providerId}`,
         );
@@ -728,11 +958,11 @@ export class BookingsService {
             },
           );
           this.logger.log(
-            `[BookingsService] Evento de missão 'booking.created' disparado para o cliente ${createdBooking.client.userId}.`,
+            `[BookingsService] Evento de missao 'booking.created' disparado para o cliente ${createdBooking.client.userId}.`,
           );
         } catch (e) {
           this.logger.warn(
-            `[BookingsService] create - Falha ao emitir evento de missão booking.created: ${e?.message}`,
+            `[BookingsService] create - Falha ao emitir evento de missao booking.created: ${e?.message}`,
           );
         }
 
@@ -742,6 +972,14 @@ export class BookingsService {
 
         if (couponId) {
           await this.couponsService.markCouponAsUsed(couponId);
+        }
+
+        if (idempotencyNodeKey) {
+          await this.cacheService.set(
+            idempotencyNodeKey,
+            createdBooking,
+            IDEMPOTENCY_TTL_SECONDS,
+          );
         }
 
         return createdBooking;
@@ -779,6 +1017,303 @@ export class BookingsService {
         `[BookingsService] create - Lock liberado para a chave: ${lockKey}`,
       );
     }
+  }
+
+  async quotePrice(
+    clientUserId: string,
+    bookingQuoteRequestDto: BookingQuoteRequestDto,
+    request?: Request,
+  ): Promise<BookingQuoteResponseDto> {
+    const locale = (request as any)?.locale ?? 'pt-BR';
+    const client = await this.clientsService.findClientByUserId(clientUserId);
+    if (!client) {
+      throw new NotFoundException(
+        await this.i18n.translate('client.notFound', locale),
+      );
+    }
+
+    const provider = await this.providersService.findOne(
+      bookingQuoteRequestDto.providerId,
+    );
+    if (!provider) {
+      throw new NotFoundException(
+        await this.i18n.translate('provider.notFound', locale, {
+          id: bookingQuoteRequestDto.providerId,
+        }),
+      );
+    }
+
+    if (provider.verificationStatus !== VerificationStatus.APPROVED) {
+      throw new ForbiddenException(
+        'O provedor deve estar aprovado para aceitar agendamentos.',
+      );
+    }
+
+    const providerService = await this.providerServicesService.findOne(
+      bookingQuoteRequestDto.providerServiceId,
+      bookingQuoteRequestDto.providerId,
+    );
+    if (!providerService) {
+      throw new NotFoundException(
+        await this.i18n.translate('providerService.notFound', locale, {
+          providerServiceId: bookingQuoteRequestDto.providerServiceId,
+          providerId: bookingQuoteRequestDto.providerId,
+        }),
+      );
+    }
+
+    const quoteBookingDto: CreateBookingDto = {
+      providerId: bookingQuoteRequestDto.providerId,
+      providerServiceId: bookingQuoteRequestDto.providerServiceId,
+      scheduledDate: bookingQuoteRequestDto.scheduledDate,
+      scheduledTime: bookingQuoteRequestDto.scheduledTime,
+      totalPrice: 0,
+      notes: undefined,
+      address: {
+        cep: bookingQuoteRequestDto.address.cep ?? '00000000',
+        street: 'Quote',
+        number: '0',
+        complement: null,
+        neighborhood: 'Quote',
+        city: bookingQuoteRequestDto.address.city,
+        state: bookingQuoteRequestDto.address.state,
+        latitude: bookingQuoteRequestDto.address.latitude,
+        longitude: bookingQuoteRequestDto.address.longitude,
+      } as CreateAddressDto,
+      requestedDurationMinutes: bookingQuoteRequestDto.durationMinutes,
+      couponCode: bookingQuoteRequestDto.couponCode,
+    } as CreateBookingDto;
+
+    const calculation = await this.calculateQuoteForBooking({
+      clientId: client.id,
+      clientUserId,
+      provider,
+      providerService,
+      createBookingDto: quoteBookingDto,
+      locale,
+      clientCompletedBookingsCount: client.completedBookingsCount ?? 0,
+      subscriptionId: bookingQuoteRequestDto.subscriptionId,
+      addons: bookingQuoteRequestDto.addons,
+      insurancePlanId: bookingQuoteRequestDto.insurancePlanId ?? null,
+    });
+
+    return calculation.quoteResponse;
+  }
+
+  private async calculateQuoteForBooking(
+    options: BookingQuoteCalculationOptions,
+  ): Promise<BookingQuoteCalculationResult> {
+    const {
+      clientId,
+      provider,
+      providerService,
+      createBookingDto,
+      locale,
+      addons,
+      clientCompletedBookingsCount,
+      insurancePlanId,
+    } = options;
+
+    const priceResult = await calculateServiceTotalPrice({
+      providerService,
+      createBookingDto,
+      locale,
+      translate: (key, localeKey, replacements) =>
+        this.i18n.translate(key, locale, replacements),
+      minHourlyMinutes: MIN_HOURLY_MINUTES,
+    });
+
+    if (priceResult.normalizedRequestedDurationMinutes) {
+      createBookingDto.requestedDurationMinutes =
+        priceResult.normalizedRequestedDurationMinutes;
+    }
+
+    const dynamicPrice = await this.pricingService.calculatePrice({
+      serviceId: providerService.serviceId,
+      providerId: provider.id,
+      latitude: createBookingDto.address.latitude,
+      longitude: createBookingDto.address.longitude,
+      scheduledDate: createBookingDto.scheduledDate,
+      cityCode: createBookingDto.address?.city,
+    });
+
+    let subtotal = new Prisma.Decimal(dynamicPrice.finalPrice);
+    let finalPrice = subtotal;
+    let discountAmount = new Prisma.Decimal(0);
+    let couponId: string | null = null;
+    const couponCode = createBookingDto.couponCode?.trim();
+
+    if (couponCode) {
+      this.logger.log(`[BookingsService] quote - Tentando aplicar cupom: ${couponCode}`);
+
+      const couponResult = await this.couponsService.applyCoupon(
+        couponCode,
+        options.clientUserId,
+        ({
+          originalPrice: finalPrice.toNumber(),
+          clientId,
+          providerId: provider.id,
+          providerServiceId: providerService.id,
+          legacyProviderServiceId: providerService.serviceId,
+          scheduledDate: createBookingDto.scheduledDate,
+          serviceId: providerService.serviceId,
+        }) as any,
+      );
+
+      if (couponResult.coupon) {
+        couponId = couponResult.coupon.id;
+        discountAmount = new Prisma.Decimal(couponResult.discountAmount);
+        finalPrice = new Prisma.Decimal(couponResult.newTotalPrice);
+        this.logger.log(
+          `[BookingsService] quote - Cupom ${couponCode} aplicado. Novo preço: ${finalPrice.toFixed(2)}`,
+        );
+      } else {
+        this.logger.warn(
+          `[BookingsService] quote - Cupom ${couponCode} não aplicável: ${couponResult.message}`,
+        );
+      }
+    }
+
+    const estimateTotalCents = Math.round(finalPrice.mul(100).toNumber());
+    const providerRating = provider.averageRating ?? 0;
+    const providerCompletedBookings = provider.completedBookingsCount ?? 0;
+    const insuranceOptions = this.insuranceService.getPlans({
+      clientCompleted: clientCompletedBookingsCount,
+      estimateTotalCents,
+      provider: {
+        rating: providerRating,
+        completedBookings: providerCompletedBookings,
+        newProvider: providerCompletedBookings < 5,
+      },
+    });
+    const requestedInsurancePlan = insurancePlanId
+      ? insuranceOptions.find((plan) => plan.id === insurancePlanId)
+      : null;
+    const selectedInsurance =
+      requestedInsurancePlan && requestedInsurancePlan.eligible
+        ? requestedInsurancePlan
+        : null;
+    const insuranceFeeCents = selectedInsurance?.finalPriceCents ?? 0;
+    const insuranceFeeDecimal = new Prisma.Decimal(insuranceFeeCents).dividedBy(100);
+    finalPrice = finalPrice.add(insuranceFeeDecimal);
+
+    const quoteHash = this.buildQuoteHash({
+      providerId: createBookingDto.providerId,
+      providerServiceId: providerService.id,
+      serviceId: providerService.serviceId,
+      scheduledDate: createBookingDto.scheduledDate,
+      scheduledTime: createBookingDto.scheduledTime,
+      durationMinutes:
+        createBookingDto.requestedDurationMinutes ?? null,
+      couponCode: couponCode ?? null,
+      subscriptionId: options.subscriptionId ?? null,
+      addons: addons ?? [],
+      insurancePlanId: insurancePlanId ?? null,
+      address: createBookingDto.address,
+      minHourlyMinutes: MIN_HOURLY_MINUTES,
+      version: QUOTE_HASH_VERSION,
+    });
+
+    const quoteId = quoteHash;
+    const platformFee = finalPrice.mul(
+      new Prisma.Decimal(Math.max(0, Math.min(1, COMMISSION_RATE))),
+    );
+    const providerNet = finalPrice.sub(platformFee);
+    const totalCents = Math.round(finalPrice.toNumber() * 100);
+    const breakdown = [
+      {
+        label: 'Subtotal',
+        amount: Number(subtotal.toNumber()),
+        type: 'subtotal',
+      },
+      ...(couponId
+        ? [
+            {
+              label: couponCode
+                ? `Cupom ${couponCode}`
+                : 'Cupom aplicado',
+              amount: -Number(discountAmount.toNumber()),
+              type: 'coupon',
+            },
+          ]
+        : []),
+      ...(insuranceFeeCents > 0
+        ? [
+            {
+              label: 'Seguro',
+              amount: Number(insuranceFeeDecimal.toNumber()),
+              type: 'insurance',
+            },
+          ]
+        : []),
+    ];
+
+    const quoteResponse: BookingQuoteResponseDto = {
+      finalPrice: Number(finalPrice.toNumber()),
+      subtotal: Number(subtotal.toNumber()),
+      discountAmount: Number(discountAmount.toNumber()),
+      platformFee: Number(platformFee.toNumber()),
+      providerNet: Number(providerNet.toNumber()),
+      couponApplied: !!couponId,
+      couponCode: couponCode ?? undefined,
+      minMinutesApplied: priceResult.normalizedRequestedDurationMinutes,
+      quoteId,
+      quoteHash,
+      expiresAt: new Date(Date.now() + QUOTE_EXPIRATION_MS).toISOString(),
+      totalCents,
+      insuranceFeeCents,
+      insuranceOptions,
+      selectedInsurance,
+      breakdown,
+    };
+
+    return {
+      finalPrice,
+      subtotal,
+      discountAmount,
+      couponId,
+      normalizedRequestedDurationMinutes:
+        priceResult.normalizedRequestedDurationMinutes,
+      quoteHash,
+      quoteId,
+      quoteResponse,
+    };
+  }
+
+  private buildQuoteHash(payload: QuoteHashPayload): string {
+    const normalizedAddons = (payload.addons ?? [])
+      .map((addon) => ({
+        id: addon.id,
+        quantity: addon.quantity ?? 1,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    const normalizedAddress = {
+      latitude: Number(payload.address.latitude.toFixed(6)),
+      longitude: Number(payload.address.longitude.toFixed(6)),
+      city: payload.address.city ?? null,
+      state: payload.address.state ?? null,
+      cep: payload.address.cep ?? null,
+    };
+
+    const normalizedPayload = {
+      version: payload.version,
+      providerId: payload.providerId,
+      providerServiceId: payload.providerServiceId,
+      serviceId: payload.serviceId ?? null,
+      scheduledDate: payload.scheduledDate,
+      scheduledTime: payload.scheduledTime,
+      durationMinutes: payload.durationMinutes ?? null,
+      couponCode: payload.couponCode ?? null,
+      subscriptionId: payload.subscriptionId ?? null,
+      addons: normalizedAddons,
+      address: normalizedAddress,
+      minHourlyMinutes: payload.minHourlyMinutes,
+    };
+
+    return createHash('sha256')
+      .update(JSON.stringify(normalizedPayload))
+      .digest('hex');
   }
 
   // NEW: Method to create a booking specifically from a subscription
@@ -866,6 +1401,8 @@ export class BookingsService {
         guaranteeClaims: true,
         coupon: true,
         paymentIntent: true,
+        bookingInsurance: true,
+        bookingProofs: true,
       },
     });
   }
@@ -918,7 +1455,12 @@ export class BookingsService {
       createBookingDto,
       request,
     );
-    const bookingDto = new BookingDetailsDto(bookingPrisma);
+    const bookingWithActions = this.withAllowedActions(
+      bookingPrisma,
+      UserRole.CLIENT,
+      clientUserId,
+    );
+    const bookingDto = new BookingDetailsDto(bookingWithActions);
 
     this.logger.log(
       `[BookingsService] createBookingAndPixCharge - Agendamento criado com sucesso (ID: ${bookingDto.id}).`,
@@ -963,7 +1505,7 @@ export class BookingsService {
     role: UserRole,
     status?: string,
     request?: Request,
-  ): Promise<BookingWithDetailsRelations[]> {
+  ): Promise<BookingWithAllowedActions[]> {
     this.logger.log(
       `[BookingsService] findUserBookings: Buscando agendamentos para userId: ${userId}, role: ${role}, status: ${status || 'todos'}`,
     );
@@ -1029,7 +1571,7 @@ export class BookingsService {
       `[BookingsService] findUserBookings: Cláusula WHERE final: ${JSON.stringify(whereClause)}`,
     );
 
-    return this.prisma.booking.findMany({
+    const bookings = await this.prisma.booking.findMany({
       where: whereClause,
       include: {
         client: {
@@ -1057,11 +1599,18 @@ export class BookingsService {
         guaranteeClaims: true,
         coupon: true,
         paymentIntent: true,
+        bookingInsurance: true,
+        bookingProofs: true,
       },
       orderBy: {
         createdAt: 'desc',
       },
     });
+    const bookingsWithDetails =
+      bookings as BookingWithDetailsRelations[];
+    return bookingsWithDetails.map((booking) =>
+      this.withAllowedActions(booking, role, userId),
+    );
   }
 
   async findOne(
@@ -1085,6 +1634,8 @@ export class BookingsService {
         guaranteeClaims: true,
         coupon: true,
         paymentIntent: true,
+        bookingInsurance: true,
+        bookingProofs: true,
       },
     });
     if (!booking) {
@@ -1092,7 +1643,7 @@ export class BookingsService {
         await this.i18n.translate('booking.notFound', locale, { id }),
       );
     }
-    return booking;
+    return booking as BookingWithDetailsRelations;
   }
 
   async updateStatus(
@@ -1116,6 +1667,8 @@ export class BookingsService {
         providerService: { include: { service: true } },
         client: { include: { user: true } },
         paymentIntent: true,
+        bookingInsurance: true,
+        bookingProofs: true,
       },
     });
 
@@ -1190,7 +1743,7 @@ export class BookingsService {
       );
     }
 
-    if (userRole === UserRole.ADMIN) {
+    if (userRole === UserRole.ADMIN || userRole === UserRole.SYSTEM) {
       canUpdate = true;
       this.logger.log(
         `[BookingsService] updateStatus - ADMIN bypass de transição para booking ${id}.`,
@@ -1526,11 +2079,41 @@ export class BookingsService {
       );
     }
 
-    const updatedBooking = await this.changeBookingStatus(id, newStatus, {
-      booking,
-      data: dataToUpdate,
-      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
-    });
+    const shouldEnforceWeeklyLimit =
+      userRole === UserRole.PROVIDER && newStatus === BookingStatus.CONFIRMED;
+
+    let updatedBooking: BookingWithDetailsRelations;
+    if (shouldEnforceWeeklyLimit) {
+      const scheduledStart = this.getScheduledAtInSaoPaulo(
+        booking.scheduledDate,
+        booking.scheduledTime,
+      );
+      const { weekStart, weekEnd } = this.getSaoPauloWeekRange(scheduledStart);
+      updatedBooking = await this.runWithWeeklyLock(
+        booking.clientId,
+        booking.providerId,
+        weekStart,
+        async () => {
+          await this.ensureWeeklyLimit(
+            booking.clientId,
+            booking.providerId,
+            weekStart,
+            weekEnd,
+          );
+          return this.changeBookingStatus(id, newStatus, {
+            booking,
+            data: dataToUpdate,
+            include: DEFAULT_BOOKING_DETAILS_INCLUDE,
+          });
+        },
+      );
+    } else {
+      updatedBooking = await this.changeBookingStatus(id, newStatus, {
+        booking,
+        data: dataToUpdate,
+        include: DEFAULT_BOOKING_DETAILS_INCLUDE,
+      });
+    }
 
     // side-effects: confirmed reminders + notifications
     if (newStatus === BookingStatus.CONFIRMED) {
@@ -1543,13 +2126,11 @@ export class BookingsService {
           const [hh, mm] = String(updatedBooking.scheduledTime || '00:00')
             .split(':')
             .map((n) => parseInt(n, 10));
-          await this.queuesService.scheduleBookingReminders({
+          await this.schedulerService.scheduleBookingReminders({
             bookingId: updatedBooking.id,
-            clientUserId: updatedBooking.client?.userId,
-            providerUserId: updatedBooking.provider?.userId,
+            clientUserId: updatedBooking.client?.userId ?? '',
             scheduledAt,
-            deeplinkClient: `/agendamento/${updatedBooking.id}`,
-            deeplinkProvider: `/agendamento/${updatedBooking.id}`,
+            targetUrl: `/client/bookings/${updatedBooking.id}`,
             locale,
           });
           this.logger.log(
@@ -1595,6 +2176,13 @@ export class BookingsService {
           `[BookingsService] updateStatus: Falha ao agendar lembretes para booking ${updatedBooking?.id}: ${e?.message || e}`,
         );
       }
+    }
+
+    if (
+      newStatus === BookingStatus.CANCELED ||
+      newStatus === BookingStatus.RESCHEDULED
+    ) {
+      await this.schedulerService.cancelPendingSchedules(updatedBooking.id);
     }
 
     // side-effects: ledger entries + fee validation
@@ -1681,6 +2269,16 @@ export class BookingsService {
     return updatedBooking;
   }
 
+  async systemChangeStatus(
+    bookingId: string,
+    newStatus: BookingStatus,
+  ): Promise<BookingWithDetailsRelations> {
+    this.logger.log(
+      `[BookingsService] systemChangeStatus: forcando transição ${bookingId} -> ${newStatus}.`,
+    );
+    return this.updateStatus(bookingId, newStatus, UserRole.SYSTEM);
+  }
+
   async findUpcomingBookings(
     providerId: string,
   ): Promise<BookingWithDetailsRelations[]> {
@@ -1717,13 +2315,17 @@ export class BookingsService {
         guaranteeClaims: true,
         coupon: true,
         paymentIntent: true,
+        bookingInsurance: true,
+        bookingProofs: true,
       },
     });
     this.logger.log(
       `[BookingsService] findUpcomingBookings: Bookings encontradas via Prisma ${upcomingPrismaBookings.length} agendamentos futuros antes da filtragem de hora.`,
     );
 
-    const filteredBookings = upcomingPrismaBookings.filter((booking) => {
+    const upcomingWithDetails =
+      upcomingPrismaBookings as BookingWithDetailsRelations[];
+    const filteredBookings = upcomingWithDetails.filter((booking) => {
       const bookingDateTime =
         booking.scheduledStart ??
         this.getScheduledAtInSaoPaulo(
@@ -1804,6 +2406,8 @@ export class BookingsService {
         provider: { include: { user: true } },
         paymentIntent: true,
         review: true,
+        bookingInsurance: true,
+        bookingProofs: true,
       },
     });
     if (!booking) return { canReview: false, reason: 'not_found' };
@@ -1837,10 +2441,7 @@ export class BookingsService {
   ): Promise<BookingWithDetailsRelations> {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: {
-        client: { include: { user: true } },
-        provider: { include: { user: true } },
-      },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
     if (!booking) throw new NotFoundException('Booking não encontrado.');
     if (booking.provider.userId !== actorUserId)
@@ -1872,10 +2473,7 @@ export class BookingsService {
   ): Promise<BookingWithDetailsRelations> {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: {
-        client: { include: { user: true } },
-        provider: { include: { user: true } },
-      },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
     if (!booking) throw new NotFoundException('Booking não encontrado.');
     if (booking.provider.userId !== actorUserId)
@@ -1905,21 +2503,27 @@ export class BookingsService {
   async startService(bookingId: string, providerUserId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: {
-        provider: { include: { user: true } },
-        client: { include: { user: true } },
-        paymentIntent: true,
-      },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
     if (!booking) throw new NotFoundException('Agendamento não encontrado.');
     if (booking.provider.userId !== providerUserId)
       throw new ForbiddenException('Somente o prestador pode iniciar.');
+    if (booking.bookingInsurance?.proofRequired) {
+      await this.ensureProofRecorded(booking.id, BookingProofType.CHECKIN);
+    }
     if (booking.status !== BookingStatus.ARRIVED)
       throw new BadRequestException(
         'Status inválido para iniciar. Deve ser ARRIVED.',
       );
     if (booking.paymentIntent?.status !== 'PAID')
       throw new BadRequestException('Pagamento não confirmado.');
+
+    await this.schedulerService.notifyJobStarted({
+      bookingId,
+      clientUserId: booking.client?.userId ?? '',
+      targetUrl: `/client/bookings/${bookingId}`,
+      locale: 'pt-BR',
+    });
 
     const scheduledStart =
       booking.scheduledStart ||
@@ -1970,11 +2574,21 @@ export class BookingsService {
   async completeService(bookingId: string, providerUserId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { provider: true, paymentIntent: true },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
     if (!booking) throw new NotFoundException('Agendamento não encontrado.');
     if (booking.provider.userId !== providerUserId)
       throw new ForbiddenException('Somente o prestador pode concluir.');
+    if (booking.bookingInsurance?.proofRequired) {
+      const checkoutProof = await this.ensureProofRecorded(
+        booking.id,
+        BookingProofType.CHECKOUT,
+      );
+      const planId = booking.bookingInsurance.planId;
+      if (['PREMIUM', 'TOTAL'].includes(planId ?? '') && !checkoutProof.videoUrl) {
+        throw new BadRequestException('checkout-proof-video-required');
+      }
+    }
     if (booking.status !== BookingStatus.STARTED)
       throw new BadRequestException(
         'Status inválido para concluir. Deve ser STARTED.',
@@ -1993,6 +2607,13 @@ export class BookingsService {
         completedByUser: { connect: { id: providerUserId } },
       },
       include: DEFAULT_BOOKING_DETAILS_INCLUDE,
+    });
+
+    await this.schedulerService.notifyJobEnded({
+      bookingId,
+      clientUserId: updated.client?.userId ?? '',
+      targetUrl: `/client/bookings/${bookingId}`,
+      locale: 'pt-BR',
     });
 
     // side-effects: notifications
@@ -2036,7 +2657,7 @@ export class BookingsService {
     const now = new Date();
     const inProgress = await this.prisma.booking.findMany({
       where: { status: BookingStatus.STARTED },
-      include: { paymentIntent: true },
+      include: { paymentIntent: true, bookingInsurance: true, bookingProofs: true },
     });
 
     const toComplete = inProgress.filter((b) => {
@@ -2126,7 +2747,7 @@ export class BookingsService {
 
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { client: true, provider: true },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
     if (!booking) {
@@ -2188,7 +2809,7 @@ export class BookingsService {
 
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { client: true, provider: true, address: true },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
     if (!booking) {
@@ -2253,7 +2874,7 @@ export class BookingsService {
 
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { client: true, provider: true },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
     if (!booking) {
