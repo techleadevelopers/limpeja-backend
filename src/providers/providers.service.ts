@@ -86,16 +86,16 @@ export type ServiceForFrontend = Omit<
 };
 
 export type ProviderServiceForFrontend = Omit<
-    ProviderService,
-    | 'price'
-    | 'service'
-    | 'createdAt'
-    | 'updatedAt'
-    | 'pricingType'
-    | 'pricePerSquareMeter'
-    | 'pricePerRoom'
-    | 'pricePerHour'
-  > & {
+  ProviderService,
+  | 'price'
+  | 'service'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'pricingType'
+  | 'pricePerSquareMeter'
+  | 'pricePerRoom'
+  | 'pricePerHour'
+> & {
   price: number;
   service: ServiceForFrontend;
   createdAt: string;
@@ -1178,7 +1178,8 @@ export class ProvidersService {
                       'description', ps.description,
                       'pricingType', ps."pricingType",
                       'pricePerSquareMeter', ps."pricePerSquareMeter",
-                      'pricePerRoom', ps."pricePerRoom",
+                'pricePerHour', ps."pricePerHour",
+                'pricePerRoom', ps."pricePerRoom",
                       'service', json_build_object(
                           'id', s.id,
                           'name', s.name,
@@ -1301,6 +1302,9 @@ export class ProvidersService {
                     createdAt: ps.createdAt,
                     updatedAt: ps.updatedAt,
                     pricingType: ps.pricingType,
+                    pricePerHour: ps.pricePerHour
+                      ? new Decimal(ps.pricePerHour)
+                      : new Decimal(0),
                     pricePerSquareMeter: ps.pricePerSquareMeter
                       ? new Decimal(ps.pricePerSquareMeter)
                       : null,
@@ -1634,6 +1638,7 @@ export class ProvidersService {
                   'updatedAt', ps."updatedAt",
                   'description', ps.description,
                   'pricingType', ps."pricingType",
+                  'pricePerHour', ps."pricePerHour",
                   'pricePerSquareMeter', ps."pricePerSquareMeter",
                   'pricePerRoom', ps."pricePerRoom",
                   'service', json_build_object(
@@ -1766,6 +1771,9 @@ export class ProvidersService {
                 createdAt: ps.createdAt,
                 updatedAt: ps.updatedAt,
                 pricingType: ps.pricingType,
+                pricePerHour: ps.pricePerHour
+                  ? new Decimal(ps.pricePerHour)
+                  : new Decimal(0),
                 pricePerSquareMeter: ps.pricePerSquareMeter
                   ? new Decimal(ps.pricePerSquareMeter)
                   : null,
