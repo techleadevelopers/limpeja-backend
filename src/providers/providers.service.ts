@@ -86,15 +86,16 @@ export type ServiceForFrontend = Omit<
 };
 
 export type ProviderServiceForFrontend = Omit<
-  ProviderService,
-  | 'price'
-  | 'service'
-  | 'createdAt'
-  | 'updatedAt'
-  | 'pricingType'
-  | 'pricePerSquareMeter'
-  | 'pricePerRoom'
-> & {
+    ProviderService,
+    | 'price'
+    | 'service'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'pricingType'
+    | 'pricePerSquareMeter'
+    | 'pricePerRoom'
+    | 'pricePerHour'
+  > & {
   price: number;
   service: ServiceForFrontend;
   createdAt: string;
