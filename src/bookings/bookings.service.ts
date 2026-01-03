@@ -1084,18 +1084,30 @@ export class BookingsService {
       couponCode: bookingQuoteRequestDto.couponCode,
     } as CreateBookingDto;
 
-    const calculation = await this.calculateQuoteForBooking({
-      clientId: client.id,
-      clientUserId,
-      provider,
-      providerService,
-      createBookingDto: quoteBookingDto,
-      locale,
-      clientCompletedBookingsCount: client.completedBookingsCount ?? 0,
-      subscriptionId: bookingQuoteRequestDto.subscriptionId,
-      addons: bookingQuoteRequestDto.addons,
-      insurancePlanId: bookingQuoteRequestDto.insurancePlanId ?? null,
-    });
+    let calculation;
+    try {
+      calculation = await this.calculateQuoteForBooking({
+        clientId: client.id,
+        clientUserId,
+        provider,
+        providerService,
+        createBookingDto: quoteBookingDto,
+        locale,
+        clientCompletedBookingsCount: client.completedBookingsCount ?? 0,
+        subscriptionId: bookingQuoteRequestDto.subscriptionId,
+        addons: bookingQuoteRequestDto.addons,
+        insurancePlanId: bookingQuoteRequestDto.insurancePlanId ?? null,
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `[BookingsService] quotePrice - erro ao calcular quote: ${error?.message || 'sem mensagem'}`,
+        error?.stack,
+      );
+      this.logger.error(
+        `[BookingsService] quotePrice - payload: ${JSON.stringify(bookingQuoteRequestDto)}`,
+      );
+      throw error;
+    }
 
     return calculation.quoteResponse;
   }
