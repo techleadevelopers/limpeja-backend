@@ -102,6 +102,7 @@ export type ProviderServiceForFrontend = Omit<
   pricingType: PricingType;
   pricePerSquareMeter: number | null;
   pricePerRoom: number | null;
+  pricePerHour: number;
 };
 
 export type ProviderWithCalculatedRating = {
@@ -401,6 +402,7 @@ export class ProvidersService {
         createdAt: ps.createdAt.toISOString(),
         updatedAt: ps.updatedAt.toISOString(),
         pricingType: ps.pricingType,
+        pricePerHour: ps.pricePerHour ? ps.pricePerHour.toNumber() : 0,
         pricePerSquareMeter: ps.pricePerSquareMeter?.toNumber() || null,
         pricePerRoom: ps.pricePerRoom?.toNumber() || null,
       })) as ProviderServiceForFrontend[],
