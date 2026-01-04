@@ -6,9 +6,11 @@ import { APP_FILTER } from '@nestjs/core';
 import { LocaleMiddleware } from './middlewares/locale.middleware';
 import { ContactLeakDetector } from './services/contact-leak-detector.service';
 import { ContactLeakPolicyService } from './services/contact-leak-policy.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Global() // Torna este módulo globalmente disponível
 @Module({
+  imports: [NotificationsModule],
   providers: [
     I18nService,
     {
