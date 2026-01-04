@@ -39,6 +39,7 @@ import { BookingAndPixResponseDto } from './dto/booking-and-pix-response.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { BookingDetailsDto } from './dto/booking-details.dto';
 import { ReportDisputeDto } from './dto/report-dispute.dto';
+import { BookingLocationInput } from './dto/booking-location.dto';
 import { QueuesService } from '../queues/queues.service';
 import { PricingService } from '../pricing/pricing.service';
 import { CouponsService } from '../coupons/coupons.service';
@@ -100,7 +101,12 @@ const DEFAULT_BOOKING_DETAILS_INCLUDE = {
   bookingProofs: true,
 } satisfies Prisma.BookingInclude;
 
-const QUOTE_HASH_VERSION = process.env.BOOKING_QUOTE_HASH_VERSION ?? '1';
+const PRICING_VERSION =
+  process.env.BOOKING_PRICING_VERSION ??
+  process.env.BOOKING_QUOTE_HASH_VERSION ??
+  'v1';
+const QUOTE_HASH_VERSION =
+  process.env.BOOKING_QUOTE_HASH_VERSION ?? PRICING_VERSION;
 const QUOTE_EXPIRATION_MS =
   Number(process.env.BOOKING_QUOTE_TTL_MS ?? 10 * 60 * 1000) ||
   10 * 60 * 1000;
@@ -134,6 +140,7 @@ interface QuoteHashPayload {
   };
   minHourlyMinutes: number;
   version: string;
+  pricingVersion: string;
   insurancePlanId?: InsurancePlanId | null;
 }
 
@@ -168,6 +175,7 @@ interface BookingProofPayload {
   videoUrl?: string | null;
   hashes?: Record<string, unknown> | null;
   timestamps?: Record<string, unknown> | null;
+  location?: BookingLocationInput;
 }
 
 @Injectable()
@@ -485,6 +493,49 @@ export class BookingsService {
     return proof;
   }
 
+  private requiresProofGps(booking: BookingWithDetailsRelations): boolean {
+    const insurance = booking.bookingInsurance;
+    if (!insurance) {
+      return false;
+    }
+    return (
+      insurance.proofRequired ||
+      insurance.planId === InsurancePlanId.PREMIUM
+    );
+  }
+
+  private buildGpsFields(
+    location: BookingLocationInput | undefined,
+    prefix: 'arrived' | 'started' | 'completed',
+  ): Prisma.BookingUpdateInput {
+    if (!location) {
+      return {};
+    }
+    const payload: Record<string, number | null> = {
+      [`${prefix}Lat`]: location.lat,
+      [`${prefix}Lng`]: location.lng,
+      [`${prefix}AccuracyM`]: location.accuracyM ?? null,
+    };
+    return payload as Prisma.BookingUpdateInput;
+  }
+
+  private logGpsEvent(
+    bookingId: string,
+    providerId: string,
+    event: string,
+    location?: BookingLocationInput,
+  ) {
+    this.logger.log(
+      `[BookingsService] GPS event ${event}: ${JSON.stringify({
+        bookingId,
+        providerId,
+        gpsCaptured: Boolean(location),
+        lat: location?.lat ?? null,
+        lng: location?.lng ?? null,
+      })}`,
+    );
+  }
+
   async submitProof(
     bookingId: string,
     providerUserId: string,
@@ -532,8 +583,20 @@ export class BookingsService {
           timestamps: payload.timestamps
             ? (payload.timestamps as Prisma.InputJsonValue)
             : null,
+          latitude: payload.location?.lat ?? null,
+          longitude: payload.location?.lng ?? null,
+          accuracyMeters: payload.location?.accuracyM ?? null,
+          capturedAt: payload.location?.capturedAt
+            ? new Date(payload.location.capturedAt)
+            : null,
         },
       });
+      this.logGpsEvent(
+        booking.id,
+        booking.providerId,
+        `submit-proof-${type}`,
+        payload.location,
+      );
       return proof;
     } catch (error: any) {
       if (
@@ -803,6 +866,18 @@ export class BookingsService {
         quoteHashPayload,
         requestKey,
       });
+
+      if (createBookingDto.quoteExpiresAt) {
+        const expiresAt = new Date(createBookingDto.quoteExpiresAt);
+        if (expiresAt.getTime() < Date.now()) {
+          this.logger.warn(
+            `[BookingsService] create - Quote expired for client ${client.id} requestKey=${requestKey}`,
+          );
+          throw new ConflictException({
+            message: 'QUOTE_EXPIRED',
+          });
+        }
+      }
 
       if (
         createBookingDto.quoteHash &&
@@ -1108,11 +1183,15 @@ export class BookingsService {
     });
 
     const requestKey = this.buildQuoteRequestKey(quoteHashPayload);
+    this.logger.log(
+      `[BookingsService] quote.request requestKey=${requestKey} providerServiceId=${bookingQuoteRequestDto.providerServiceId}`,
+    );
     const quoteHash = this.hashRequestKey(requestKey);
     const cacheKey = `${QUOTE_CACHE_KEY_PREFIX}${quoteHash}`;
 
     const cached = await this.cacheService.get<BookingQuoteResponseDto>(cacheKey);
     if (cached) {
+      this.logger.log(`[BookingsService] quote.cache.hit requestKey=${requestKey}`);
       return cached;
     }
 
@@ -1364,6 +1443,7 @@ export class BookingsService {
       },
       minHourlyMinutes: MIN_HOURLY_MINUTES,
       version: QUOTE_HASH_VERSION,
+      pricingVersion: PRICING_VERSION,
       insurancePlanId: options.insurancePlanId ?? null,
     };
   }
@@ -1385,6 +1465,7 @@ export class BookingsService {
     };
 
     const normalizedPayload = {
+      pricingVersion: payload.pricingVersion,
       version: payload.version,
       providerId: payload.providerId,
       providerServiceId: payload.providerServiceId,
@@ -2561,6 +2642,7 @@ export class BookingsService {
   async arriveAtLocation(
     bookingId: string,
     actorUserId: string,
+    location?: BookingLocationInput,
   ): Promise<BookingWithDetailsRelations> {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
@@ -2576,22 +2658,28 @@ export class BookingsService {
     }
 
     const now = new Date();
+    const gpsData = this.buildGpsFields(location, 'arrived');
     // bloco de arriveAtLocation
     const updated = await this.changeBookingStatus(bookingId, BookingStatus.ARRIVED, {
       booking,
-      data: { arrivedAt: now },
+      data: { arrivedAt: now, ...gpsData },
       include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
 
     // side-effects: notifications
     await this.notifyClientStatusUpdate(updated, BookingStatus.ARRIVED);
+    this.logGpsEvent(booking.id, booking.providerId, 'arriveAtLocation', location);
     this.logger.log(
       `[BookingsService] arriveAtLocation: Booking ${bookingId} CHEGOU.`,
     );
     return updated;
   }
 
-  async startService(bookingId: string, providerUserId: string) {
+  async startService(
+    bookingId: string,
+    providerUserId: string,
+    location?: BookingLocationInput,
+  ) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: DEFAULT_BOOKING_DETAILS_INCLUDE,
@@ -2608,6 +2696,15 @@ export class BookingsService {
       );
     if (booking.paymentIntent?.status !== 'PAID')
       throw new BadRequestException('Pagamento não confirmado.');
+
+    const locationRequired = this.requiresProofGps(booking);
+    if (locationRequired && !location) {
+      throw new BadRequestException({
+        code: 'PROOF_GPS_REQUIRED',
+        message:
+          'GPS obrigatório para iniciar serviços com seguro premium ou requisito de prova.',
+      });
+    }
 
     await this.schedulerService.notifyJobStarted({
       bookingId,
@@ -2629,11 +2726,13 @@ export class BookingsService {
       throw new BadRequestException('Fora da janela de início (±15min).');
     }
 
+    const gpsData = this.buildGpsFields(location, 'started');
     const updated = await this.changeBookingStatus(bookingId, BookingStatus.STARTED, {
       booking,
       data: {
         startedAt: now,
         startedByUser: { connect: { id: providerUserId } },
+        ...gpsData,
       },
       include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
@@ -2659,10 +2758,15 @@ export class BookingsService {
         idempotencyKey: `notif:service_started:client:${updated.id}`,
       });
     }
+    this.logGpsEvent(booking.id, booking.providerId, 'startService', location);
     return updated;
   }
 
-  async completeService(bookingId: string, providerUserId: string) {
+  async completeService(
+    bookingId: string,
+    providerUserId: string,
+    location?: BookingLocationInput,
+  ) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: DEFAULT_BOOKING_DETAILS_INCLUDE,
@@ -2687,15 +2791,26 @@ export class BookingsService {
     if (booking.paymentIntent?.status !== 'PAID')
       throw new BadRequestException('Pagamento não confirmado.');
 
+    const locationRequired = this.requiresProofGps(booking);
+    if (locationRequired && !location) {
+      throw new BadRequestException({
+        code: 'PROOF_GPS_REQUIRED',
+        message:
+          'GPS obrigatório para concluir serviços com seguro premium ou requisito de prova.',
+      });
+    }
+
     const expectedEnd = this.getExpectedEnd(booking);
     if (new Date() < expectedEnd)
       throw new BadRequestException('Ainda não atingiu o horário final.');
 
+    const gpsData = this.buildGpsFields(location, 'completed');
     const updated = await this.changeBookingStatus(bookingId, BookingStatus.FINISHED, {
       booking,
       data: {
         completedAt: new Date(),
         completedByUser: { connect: { id: providerUserId } },
+        ...gpsData,
       },
       include: DEFAULT_BOOKING_DETAILS_INCLUDE,
     });
@@ -2737,6 +2852,7 @@ export class BookingsService {
       );
     }
 
+    this.logGpsEvent(booking.id, booking.providerId, 'completeService', location);
     return updated;
   }
 
