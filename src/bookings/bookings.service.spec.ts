@@ -446,6 +446,18 @@ describe('BookingsService quote & mismatch detection', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('rejects booking creation when quote has expired', async () => {
+    const { service } = createServiceWithMocks();
+    const dto = buildCreateBookingDto();
+    dto.quoteExpiresAt = new Date(Date.now() - 60_000).toISOString();
+
+    await expect(
+      service.create('client-user', dto, createRequest()),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('QUOTE_EXPIRED'),
+    });
+  });
+
   it('stores quote responses in redis cache per request key', async () => {
     const { service, cacheService } = createServiceWithMocks();
     const quoteRequest: BookingQuoteRequestDto = {
