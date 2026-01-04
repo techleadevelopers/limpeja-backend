@@ -174,7 +174,7 @@ export class ProviderDetailsDto {
   createdAt: string;
 
   @ApiProperty({
-    description: 'Data da última atualização do cadastro',
+    description: 'Data da Aoltima atualização',
     example: '2025-01-02T12:00:00.000Z',
   })
   @IsString()
