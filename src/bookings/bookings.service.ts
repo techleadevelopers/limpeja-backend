@@ -31,6 +31,7 @@ import {
 } from '@prisma/client';
 import { ClientsService } from '../clients/clients.service';
 import { ProvidersService } from '../providers/providers.service';
+import { AvailabilityService } from '../availability/availability.service';
 import { ProviderWithCalculatedRating } from '../providers/providers.service';
 import { ProviderServicesService } from '../provider-services/provider-services.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -112,6 +113,10 @@ const QUOTE_EXPIRATION_MS =
   10 * 60 * 1000;
 const QUOTE_CACHE_TTL_SECONDS = 60;
 const QUOTE_CACHE_KEY_PREFIX = 'quote:';
+const CANCELLATION_COOLDOWN_MS = (() => {
+  const parsed = Number(process.env.CANCELLATION_COOLDOWN_MS);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+})();
 
 export type BookingWithDetailsRelations = Prisma.BookingGetPayload<{
   include: typeof DEFAULT_BOOKING_DETAILS_INCLUDE;
@@ -186,6 +191,7 @@ export class BookingsService {
     private prisma: PrismaService,
     private clientsService: ClientsService,
     private providersService: ProvidersService,
+    private availabilityService: AvailabilityService,
     private providerServicesService: ProviderServicesService,
     private notificationsService: NotificationsService,
     private queuesService: QueuesService,
@@ -365,6 +371,28 @@ export class BookingsService {
       weekStart,
       weekEnd: new Date(nextWeekStart.getTime() - 1),
     };
+  }
+
+  private async enforceCancellationCooldown(
+    clientId: string,
+    locale: string,
+  ): Promise<Date | null> {
+    const client = await this.prisma.client.findUnique({
+      where: { id: clientId },
+      select: { cancellationCooldownUntil: true },
+    });
+    const now = new Date();
+    const cooldownUntil = client?.cancellationCooldownUntil;
+    if (cooldownUntil && cooldownUntil > now) {
+      const message = await this.i18n
+        .translate('booking.badRequest.cancellationCooldown', locale)
+        .catch(() => null);
+      throw new BadRequestException(
+        message ??
+          'Você cancelou recentemente e precisa aguardar antes de cancelar novamente.',
+      );
+    }
+    return cooldownUntil ?? null;
   }
 
   private async countWeeklyBookings(
@@ -908,6 +936,12 @@ export class BookingsService {
       const scheduledStart = this.getScheduledAtInSaoPaulo(
         createBookingDto.scheduledDate,
         createBookingDto.scheduledTime,
+      );
+
+      await this.availabilityService.canHoldSlot(
+        provider.id,
+        client.id,
+        scheduledStart,
       );
 
       const durationMinutes =
@@ -1899,6 +1933,7 @@ export class BookingsService {
 
     let canUpdate = false;
     let errorMessageKey: string = 'booking.badRequest.invalidStatusTransition';
+    let previousCancellationCooldown: Date | null = null;
 
     const finalizedStates = [
       BookingStatus.FINISHED,
@@ -2009,6 +2044,17 @@ export class BookingsService {
         await this.i18n.translate(errorMessageKey, locale, {
           status: booking.status,
         }),
+      );
+    }
+
+
+    if (
+      newStatus === BookingStatus.CANCELED &&
+      userRole === UserRole.CLIENT
+    ) {
+      previousCancellationCooldown = await this.enforceCancellationCooldown(
+        booking.clientId,
+        locale,
       );
     }
     this.logger.log(
@@ -2231,13 +2277,42 @@ export class BookingsService {
       newStatus === BookingStatus.CANCELED &&
       booking.status !== BookingStatus.CANCELED
     ) {
+      const clientUpdate: Prisma.ClientUpdateInput = {
+        cancellationCount: { increment: 1 },
+      };
+      if (userRole === UserRole.CLIENT && CANCELLATION_COOLDOWN_MS > 0) {
+        const baseTime =
+          previousCancellationCooldown && previousCancellationCooldown > now
+            ? previousCancellationCooldown.getTime()
+            : now.getTime();
+        clientUpdate.cancellationCooldownUntil = new Date(
+          baseTime + CANCELLATION_COOLDOWN_MS,
+        );
+      }
       await this.prisma.client.update({
         where: { id: booking.clientId },
-        data: { cancellationCount: { increment: 1 } },
+        data: clientUpdate,
       });
       this.logger.log(
         `[BookingsService] updateStatus: Cliente ${booking.clientId} teve cancellationCount incrementado.`,
       );
+      if (userRole === UserRole.CLIENT) {
+        const slotStart =
+          booking.scheduledStart ??
+          this.getScheduledAtInSaoPaulo(
+            booking.scheduledDate,
+            booking.scheduledTime,
+          );
+        if (!Number.isNaN(slotStart.getTime())) {
+          await this.prisma.slotHoldStrike.create({
+            data: {
+              clientId: booking.clientId,
+              providerId: booking.providerId,
+              start: slotStart,
+            },
+          });
+        }
+      }
     } else if (
       newStatus === BookingStatus.NO_SHOW &&
       booking.status !== BookingStatus.NO_SHOW
