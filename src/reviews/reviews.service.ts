@@ -2,10 +2,10 @@
 import {
   Injectable,
   NotFoundException,
-  ConflictException,
   ForbiddenException,
   Logger,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubmitReviewDto } from './dto/submit-review.dto';
@@ -111,6 +111,8 @@ type ProviderWithRelationsForSuggestions = Prisma.ProviderGetPayload<{
 @Injectable()
 export class ReviewsService {
   private readonly logger = new Logger(ReviewsService.name);
+  private static readonly REVIEW_RATE_LIMIT = 3;
+  private static readonly REVIEW_LOOKBACK_DAYS = 30;
 
   constructor(
     private prisma: PrismaService,
@@ -246,10 +248,37 @@ export class ReviewsService {
           throw new BadRequestException('Pagamento não confirmado.');
         }
 
-        if (booking.isReviewed || booking.review) {
-          throw new ConflictException(
-            `Agendamento com ID "${bookingId}" já possui uma avaliação.`,
+        const existingReview = await tx.review.findFirst({
+          where: { bookingId },
+        });
+        if (existingReview) {
+          throw new BadRequestException(
+            {
+              code: 'review.already_exists_for_booking',
+              message: 'Este agendamento já possui uma avaliação registrada.',
+            },
           );
+        }
+
+        const rateLimitWindowStart = new Date();
+        rateLimitWindowStart.setDate(
+          rateLimitWindowStart.getDate() - ReviewsService.REVIEW_LOOKBACK_DAYS,
+        );
+
+        const recentReviewCount = await tx.review.count({
+          where: {
+            clientId: booking.clientId,
+            providerId: booking.providerId,
+            createdAt: { gte: rateLimitWindowStart },
+          },
+        });
+
+        if (recentReviewCount >= ReviewsService.REVIEW_RATE_LIMIT) {
+          throw new BadRequestException({
+            code: 'review.rate_limited',
+            message:
+              'Você atingiu o limite de avaliações para este prestador nas últimas 30 dias.',
+          });
         }
 
         const review = await tx.review.create({
