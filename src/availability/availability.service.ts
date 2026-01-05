@@ -28,6 +28,26 @@ const assertFullHour = (label: string, time: string) => {
   }
 };
 
+const DEFAULT_SLOT_HOLD_STRIKE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_SLOT_HOLD_STRIKE_THRESHOLD = 2;
+
+const parsePositiveNumber = (value: string | undefined, fallback: number) => {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) && normalized > 0 ? normalized : fallback;
+};
+
+const SLOT_HOLD_STRIKE_WINDOW_MS = parsePositiveNumber(
+  process.env.SLOT_HOLD_STRIKE_WINDOW_MS,
+  DEFAULT_SLOT_HOLD_STRIKE_WINDOW_MS,
+);
+const SLOT_HOLD_STRIKE_THRESHOLD = Math.max(
+  1,
+  parsePositiveNumber(
+    process.env.SLOT_HOLD_STRIKE_THRESHOLD,
+    DEFAULT_SLOT_HOLD_STRIKE_THRESHOLD,
+  ),
+);
+
 @Injectable()
 export class AvailabilityService {
   constructor(private prisma: PrismaService) {}
@@ -368,6 +388,33 @@ export class AvailabilityService {
         isAvailable: true,
       },
     });
+  }
+
+  async canHoldSlot(
+    providerId: string,
+    clientId: string,
+    start: Date,
+  ): Promise<void> {
+    const slotStart = start instanceof Date ? start : new Date(start);
+    if (Number.isNaN(slotStart.getTime())) {
+      throw new BadRequestException('Horário inválido para o hold de slot.');
+    }
+
+    const windowStart = new Date(Date.now() - SLOT_HOLD_STRIKE_WINDOW_MS);
+    const strikeCount = await this.prisma.slotHoldStrike.count({
+      where: {
+        clientId,
+        providerId,
+        start: slotStart,
+        createdAt: { gte: windowStart },
+      },
+    });
+
+    if (strikeCount >= SLOT_HOLD_STRIKE_THRESHOLD) {
+      throw new BadRequestException(
+        'Você cancelou este slot muitas vezes recentemente; escolha outro horário ou aguarde.',
+      );
+    }
   }
 
   async deleteAvailability(
