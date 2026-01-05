@@ -43,7 +43,7 @@ export class InsuranceService {
     const riskMultiplierBps = Math.round(riskModifier * 10000);
 
     return INSURANCE_PLANS.map((plan) => {
-      const { eligible, reasons } = this.evaluateEligibility(plan.id, normalizedInput);
+      const { eligible, reasons } = this.evaluateEligibility();
       return {
         ...plan,
         finalPriceCents: this.applyRisk(plan.basePriceCents, riskModifier),
@@ -70,29 +70,10 @@ export class InsuranceService {
     };
   }
 
-  private evaluateEligibility(
-    planId: InsurancePlanId,
-    context: InsurancePlansCalculationContext,
-  ): { eligible: boolean; reasons: string[] } {
-    const reasons: string[] = [];
-
-    if (planId === InsurancePlanId.PREMIUM && context.clientCompleted < 2) {
-      reasons.push('Premium requires at least 2 completed client bookings.');
-    }
-
-    if (planId === InsurancePlanId.TOTAL) {
-      if (context.clientCompleted < 5) {
-        reasons.push('Total requires at least 5 completed client bookings.');
-      }
-
-      if (context.provider.rating < 4.85) {
-        reasons.push('Total requires a provider rating of 4.85 or higher.');
-      }
-    }
-
+  private evaluateEligibility(): { eligible: true; reasons: string[] } {
     return {
-      eligible: reasons.length === 0,
-      reasons,
+      eligible: true,
+      reasons: [],
     };
   }
 
