@@ -141,7 +141,7 @@ export class CreateBookingDto {
   })
   @IsOptional()
   @IsIn(INSURANCE_PLAN_IDS)
-  insurancePlanId?: InsurancePlanId;
+  insurancePlanId?: InsurancePlanId | null;
 
   @ApiPropertyOptional({
     description: 'Quote ID retornado por /bookings/quote',
