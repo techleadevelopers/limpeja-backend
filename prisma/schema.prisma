@@ -389,10 +389,12 @@ model Client {
   reviewsMade             Review[]         @relation("ClientReviews")
   noShowCount             Int              @default(0)
   cancellationCount       Int              @default(0)
+  cancellationCooldownUntil DateTime?
   subscriptions           Subscription[]
   guaranteeClaims         GuaranteeClaim[]
   createdAt               DateTime         @default(now())
   updatedAt               DateTime         @updatedAt
+  slotHoldStrikes         SlotHoldStrike[]
 }
   
 
@@ -481,6 +483,7 @@ model Provider {
 
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
+  slotHoldStrikes         SlotHoldStrike[]
 
   @@index([verificationStatus, yearsOfExperience])
 }
@@ -853,6 +856,20 @@ model Availability {
   @@index([providerId, dayOfWeek])
 }
 
+model SlotHoldStrike {
+  id         String    @id @default(cuid())
+  clientId   String
+  providerId String
+  start      DateTime
+  createdAt  DateTime  @default(now())
+
+  client     Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  provider   Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, providerId, start])
+  @@index([providerId, start, createdAt])
+}
+
 model FAQItem {
   id        String   @id @default(uuid())
   question  String   @unique
@@ -911,16 +928,23 @@ model DisputeMessage {
   dispute      Dispute       @relation("DisputeMessages", fields: [disputeId], references: [id])
 }
 
+// MIGRATION PLAN:
+// 1. Add this model change to a new migration (e.g., `npx prisma migrate dev --name consent-history`).
+// 2. Backfill the `id` column with UUIDs in SQL or via a migration script so existing rows remain.
+// 3. Ensure `userId`, `documentType`, and `consentedAt` remain indexed for fast lookups.
 model UserConsent {
+  id           String   @id @default(uuid())
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   documentType String
   version      String
+  documentHash String?
+  source       String?
   consentedAt  DateTime @default(now())
   ipAddress    String?
   userAgent    String?
 
-  @@id([userId, documentType])
+  @@index([userId, documentType, consentedAt])
 }
 
 model Subscription {
