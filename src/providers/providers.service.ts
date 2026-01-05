@@ -62,8 +62,14 @@ export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
 type ProviderForBadgeUpdate = Prisma.ProviderGetPayload<{
   include: {
     user: { select: { isVerified: true } };
-    bookings: { where: { status: 'FINISHED' } }; // ✅ CORRIGIDO
-    reviewsReceived: { where: { rating: { gte: 4 } } };
+    bookings: {
+      where: { status: 'FINISHED' };
+      select: { clientId: true };
+    };
+    reviewsReceived: {
+      where: { booking: { status: 'FINISHED' } };
+      include: { booking: { select: { status: true } } };
+    };
   };
 }>;
 
@@ -166,6 +172,16 @@ export class ProvidersService {
   private readonly logger = new Logger(ProvidersService.name);
   private readonly PROVIDERS_CACHE_KEY = 'all_approved_providers';
   private readonly PUBLIC_PROVIDERS_CACHE_TTL_SECONDS = 60;
+  private static readonly BADGE_MIN_COMPLETED_BOOKINGS = 5;
+  private static readonly BADGE_MIN_UNIQUE_CLIENTS = 5;
+  private static readonly HIGH_VOLUME_BOOKINGS_THRESHOLD = 50;
+  private static readonly AVAILABILITY_BUSY_THRESHOLD = 0.7;
+  private static readonly AVAILABILITY_LOOKBACK_DAYS = 7;
+  private static readonly AVAILABILITY_RECENT_BOOKING_STATUSES: BookingStatus[] = [
+    BookingStatus.CONFIRMED,
+    BookingStatus.STARTED,
+    BookingStatus.FINISHED,
+  ];
 
   constructor(
     private prisma: PrismaService,
@@ -1542,6 +1558,83 @@ export class ProvidersService {
     return this.search(searchDto);
   }
 
+  async getProvidersAvailabilitySummary(
+    latitude?: number,
+    longitude?: number,
+    radiusKm?: number,
+  ): Promise<{ availableProvidersCount: number; busy: boolean }> {
+    const safeLatitude = Number(latitude);
+    const safeLongitude = Number(longitude);
+    const safeRadius = Number(radiusKm);
+
+    if (
+      !Number.isFinite(safeLatitude) ||
+      !Number.isFinite(safeLongitude) ||
+      !Number.isFinite(safeRadius)
+    ) {
+      throw new BadRequestException(
+        'Latitude, longitude e radius são obrigatórios para o resumo de disponibilidade.',
+      );
+    }
+
+    const radiusMeters = Math.max(safeRadius, 0) * 1000;
+    const referencePoint = Prisma.sql`
+      ST_SetSRID(ST_MakePoint(${safeLongitude}, ${safeLatitude}), 4326)::geography
+    `;
+
+    const providersInRange = await this.prisma.$queryRaw<
+      { providerId: string }[]
+    >`
+      SELECT DISTINCT p.id AS "providerId"
+      FROM "Provider" p
+      JOIN "Address" a ON a."providerId" = p.id
+      WHERE p."verificationStatus" = ${VerificationStatus.APPROVED}
+        AND (
+          a.location IS NOT NULL
+          OR (a.latitude IS NOT NULL AND a.longitude IS NOT NULL)
+        )
+        AND ST_Distance(
+          CASE
+            WHEN a.location IS NOT NULL THEN a.location::geography
+            ELSE
+              ST_SetSRID(
+                ST_MakePoint(a.longitude::double precision, a.latitude::double precision),
+                4326
+              )::geography
+          END,
+          ${referencePoint}
+        ) <= ${radiusMeters}
+    `;
+
+    const providerIds = providersInRange.map((row) => row.providerId);
+    const availableProvidersCount = providerIds.length;
+    if (availableProvidersCount === 0) {
+      return { availableProvidersCount: 0, busy: false };
+    }
+
+    const windowStart = new Date();
+    windowStart.setDate(
+      windowStart.getDate() - ProvidersService.AVAILABILITY_LOOKBACK_DAYS,
+    );
+
+    const recentProviders = await this.prisma.booking.groupBy({
+      by: ['providerId'],
+      where: {
+        providerId: { in: providerIds },
+        scheduledDate: { gte: windowStart },
+        status: {
+          in: ProvidersService.AVAILABILITY_RECENT_BOOKING_STATUSES,
+        },
+      },
+    });
+
+    const busy =
+      recentProviders.length / availableProvidersCount >=
+      ProvidersService.AVAILABILITY_BUSY_THRESHOLD;
+
+    return { availableProvidersCount, busy };
+  }
+
   // CORREÇÃO: Agora aceita latitude/longitude opcionais pra calcular distance (via raw query PostGIS)
   async findTopRatedOrExperiencedProviders(
     latitude?: number,
@@ -1885,9 +1978,11 @@ export class ProvidersService {
         user: { select: { isVerified: true } },
         bookings: {
           where: { status: 'FINISHED' },
+          select: { clientId: true },
         },
         reviewsReceived: {
-          where: { rating: { gte: 4 } },
+          where: { booking: { status: 'FINISHED' } },
+          include: { booking: { select: { status: true } } },
         },
       },
     })) as ProviderForBadgeUpdate;
@@ -1897,25 +1992,41 @@ export class ProvidersService {
       return;
     }
 
-    const newBadges: string[] = [];
-    const completedBookingsCount = provider.bookings.length;
-    const fiveStarReviewCount = provider.reviewsReceived.filter(
-      (r) => r.rating === 5,
-    ).length;
+    const reviewsForRating = provider.reviewsReceived ?? [];
     const averageRating =
-      provider.reviewsReceived.length > 0
-        ? provider.reviewsReceived.reduce((sum, r) => sum + r.rating, 0) /
-          provider.reviewsReceived.length
+      reviewsForRating.length > 0
+        ? reviewsForRating.reduce((sum, r) => sum + r.rating, 0) /
+          reviewsForRating.length
         : 0;
 
-    if (provider.user.isVerified) {
-      newBadges.push('VERIFIED');
-    }
-    if (averageRating >= 4.5 && fiveStarReviewCount >= 10) {
-      newBadges.push('TOP_RATED');
-    }
-    if (completedBookingsCount >= 50) {
-      newBadges.push('HIGH_VOLUME');
+    const completedBookings = provider.bookings ?? [];
+    const completedBookingsCount = completedBookings.length;
+    const uniqueClientIds = completedBookings
+      .map((booking) => booking.clientId)
+      .filter((clientId): clientId is string => Boolean(clientId));
+    const uniqueClientsCount = new Set(uniqueClientIds).size;
+    const meetsBadgeThreshold =
+      completedBookingsCount >=
+        ProvidersService.BADGE_MIN_COMPLETED_BOOKINGS &&
+      uniqueClientsCount >= ProvidersService.BADGE_MIN_UNIQUE_CLIENTS;
+
+    const newBadges: string[] = [];
+    if (meetsBadgeThreshold) {
+      if (provider.user.isVerified) {
+        newBadges.push('VERIFIED');
+      }
+      const fiveStarReviewCount = reviewsForRating.filter(
+        (r) => r.rating === 5,
+      ).length;
+      if (averageRating >= 4.5 && fiveStarReviewCount >= 10) {
+        newBadges.push('TOP_RATED');
+      }
+      if (
+        completedBookingsCount >=
+        ProvidersService.HIGH_VOLUME_BOOKINGS_THRESHOLD
+      ) {
+        newBadges.push('HIGH_VOLUME');
+      }
     }
     // TODO: Adicionar badges de gamificação (ex: "Missão Concluída", "Streak")
 
