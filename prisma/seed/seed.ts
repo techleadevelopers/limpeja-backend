@@ -2314,13 +2314,20 @@ export async function main() {
 
   // UserConsent
   console.log('Criando/Atualizando consentimento do usuário...'); // CORRIGIDO: usurio -> usuário
+  const consentId = `consent-${referrerUser.id}-termos`;
   await prisma.userConsent.upsert({
-    where: { userId_documentType: { userId: referrerUser.id, documentType: 'TERMOS_DE_SERVICO' } },
-    update: { version: '1.0' },
+    where: { id: consentId },
+    update: {
+      version: '1.0',
+      consentedAt: new Date('2023-01-01T00:00:00Z'),
+    },
     create: {
+      id: consentId,
       userId: referrerUser.id,
       documentType: 'TERMOS_DE_SERVICO',
       version: '1.0',
+      source: 'seed',
+      consentedAt: new Date('2023-01-01T00:00:00Z'),
     },
   });
   console.log(`Consentimento para ${referrerUser.fullName} (Termos de Serviço) criado/atualizado.`); // CORRIGIDO: Servio -> Serviço
