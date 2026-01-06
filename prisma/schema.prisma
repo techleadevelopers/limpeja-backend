@@ -55,6 +55,7 @@ enum TransactionStatus {
 
 enum BookingStatus {
   PENDING
+  PENDING_PAYMENT
   PENDING_PROVIDER_CONFIRMATION
   CONFIRMED
   ON_THE_WAY    // Prestador a caminho
@@ -62,6 +63,7 @@ enum BookingStatus {
   STARTED       // Serviço iniciado
   FINISHED      // Serviço finalizado
   CANCELED
+  EXPIRED
   PENDING_DISPUTE
   RESCHEDULED
   REJECTED
@@ -556,7 +558,8 @@ model Booking {
   scheduledStart   DateTime?
   durationMinutes  Int?
   scheduledEnd     DateTime?        // ✅ NOVO: derivado (scheduledStart + durationMinutes)
-  status           BookingStatus    @default(PENDING)
+  status           BookingStatus    @default(PENDING_PAYMENT)
+  expiresAt        DateTime?
 
   // Preço e descontos
   totalPrice       Decimal          @db.Decimal(10, 2)
@@ -615,6 +618,7 @@ model Booking {
   @@index([providerId, status, scheduledDate])
   @@index([clientId, status, scheduledDate])
   @@index([status, scheduledDate])
+  @@index([status, expiresAt])
   @@index([providerId, scheduledStart, scheduledEnd]) // ✅ NOVO: overlap fast
 }
 
