@@ -4,7 +4,7 @@
       "phone_invalid": "Telefone inválido. Formato esperado (XX) XXXXX-XXXX."
     },
     "common": {
-      "loading": "Carregando...",
+      "loading": "",
       "error": "Erro",
       "tryAgain": "Tentar Novamente",
       "back": "Voltar",
@@ -150,7 +150,9 @@
     "schedule_service": {
       "header_title": "Agendar",
       "progress_step_date_time": "Data e Hora",
+      "progress_step_insurance": "Proteção",
       "progress_step_complete_review": "Revisão",
+      "continue_to_review": "Continuar para revisão",
       "coupon_section_title": "Cupom de Desconto",
       "coupon_input_placeholder": "Insira seu código de cupom",
       "apply_coupon_button": "Aplicar",
@@ -198,7 +200,7 @@
       "no_available_nearby": "Nenhum horário nos próximos 7 dias. Selecione outra data no calendário."
     },
     "provider_details": {
-      "loading": "Carregando...",
+      "loading": "",
       "provider_not_found": "Profissional não encontrado.",
       "error_loading_details": "Erro ao carregar os detalhes do profissional.",
       "no_photo": "Sem Foto",
