@@ -79,6 +79,7 @@ import { HttpMetricsMiddleware } from './common/middleware/http-metrics.middlewa
 import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
 import { ConfigController } from './config/config.controller';
 import { APP_GUARD } from '@nestjs/core';
+import { ExpireBookingsJob } from './worker/expire-bookings.job';
 
 @Module({
   imports: [
@@ -160,6 +161,7 @@ import { APP_GUARD } from '@nestjs/core';
   controllers: [AppController, ConfigController],
   providers: [
     AppService,
+    ExpireBookingsJob,
     TracingInterceptor,
     {
       provide: APP_GUARD,
