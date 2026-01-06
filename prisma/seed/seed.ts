@@ -2020,35 +2020,9 @@ export async function main() {
   // 9) NOTIFICAÇÕES // CORRIGIDO: NOTIFICAES -> NOTIFICAÇÕES
   console.log('Criando/Atualizando notificações...'); // CORRIGIDO: notificaes -> notificações
 
-  await prisma.notification.upsert({
-    where: { id: 'NOTIF-WELCOME-REFERRED' },
-    update: { userId: referredUser.id, title: 'Bem-vindo!', message: 'Você ganhou R$20 para a 1ª reserva', targetUrl: '/(client)/explore' }, // CORRIGIDO: Voc -> Você, 1 -> 1ª
-    create: {
-      id: 'NOTIF-WELCOME-REFERRED',
-      userId: referredUser.id,
-      type: 'COUPON_ISSUED',
-      title: 'Bem-vindo!',
-      message: 'Você ganhou R$20 para a 1ª reserva', // CORRIGIDO: Voc -> Você, 1 -> 1ª
-      targetUrl: '/(client)/explore',
-    },
-  });
   console.log(`Notificação de boas-vindas para ${referredUser.fullName} criada/atualizada.`); // CORRIGIDO: Notificao -> Notificação
 
-  await prisma.notification.upsert({
-    where: { id: 'NOTIF-RETURN-REFERRER' },
-    update: { userId: referrerUser.id, title: 'Volte e economize', message: 'Cupom de retorno disponível', targetUrl: '/(client)/bookings' }, // CORRIGIDO: disponvel -> disponível
-    create: {
-      id: 'NOTIF-RETURN-REFERRER',
-      userId: referrerUser.id,
-      type: 'COUPON_ISSUED',
-      title: 'Volte e economize',
-      message: 'Cupom de retorno disponível', // CORRIGIDO: disponvel -> disponível
-      targetUrl: '/(client)/bookings',
-    },
-  });
-  console.log(`Notificação de retorno para ${referrerUser.fullName} criada/atualizada.`); // CORRIGIDO: Notificao -> Notificação
-
-  // -----------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
   // 10) AVALIAÇÕES (REVIEWS) // CORRIGIDO: AVALIAES -> AVALIAÇÕES
   console.log('Criando/Atualizando avaliações...'); // CORRIGIDO: avaliaes -> avaliações
 
