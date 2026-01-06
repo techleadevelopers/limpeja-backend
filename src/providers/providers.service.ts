@@ -1588,7 +1588,7 @@ export class ProvidersService {
       SELECT DISTINCT p.id AS "providerId"
       FROM "Provider" p
       JOIN "Address" a ON a."providerId" = p.id
-      WHERE p."verificationStatus" = ${VerificationStatus.APPROVED}
+      WHERE p."verificationStatus"::text = ${VerificationStatus.APPROVED}::text
         AND (
           a.location IS NOT NULL
           OR (a.latitude IS NOT NULL AND a.longitude IS NOT NULL)
