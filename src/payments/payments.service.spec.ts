@@ -3,7 +3,7 @@ import {
   PaymentIntentStatus,
   Prisma,
 } from '@prisma/client';
-import { InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 
 describe('PaymentsService finalizePixPayment', () => {
@@ -26,6 +26,7 @@ describe('PaymentsService finalizePixPayment', () => {
     prismaMock = {
       $transaction: jest.fn(async (callback: any) => callback(transactionMock)),
       paymentIntent: { findFirst: jest.fn() },
+      booking: { update: jest.fn() },
     };
 
     const configServiceMock = { get: jest.fn(() => undefined) };
@@ -57,7 +58,8 @@ describe('PaymentsService finalizePixPayment', () => {
         totalPrice: new Prisma.Decimal(200),
         provider: { userId: 'provider-1' },
         client: { userId: 'client-1' },
-        status: BookingStatus.PENDING,
+        status: BookingStatus.PENDING_PAYMENT,
+        expiresAt: new Date(Date.now() + 60_000),
       },
     });
 
@@ -78,6 +80,37 @@ describe('PaymentsService finalizePixPayment', () => {
       paymentIntentId: 'pi-1',
     });
     expect((prismaMock.$transaction as jest.Mock).mock.calls[0][0]).toBeTruthy();
+    expect(prismaMock.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-1' },
+      data: { expiresAt: null },
+    });
+  });
+
+  it('rejects payment when booking expired before confirmation', async () => {
+    prismaMock.paymentIntent.findFirst.mockResolvedValue({
+      id: 'pi-expired',
+      bookingId: 'booking-expired',
+      status: PaymentIntentStatus.PENDING,
+      booking: {
+        id: 'booking-expired',
+        totalPrice: new Prisma.Decimal(120),
+        provider: { userId: 'provider-1' },
+        client: { userId: 'client-1' },
+        status: BookingStatus.PENDING_PAYMENT,
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    });
+
+    await expect(
+      (paymentsService as any).finalizePixPayment({
+        referenceId: 'booking-expired',
+        eventReference: 'event-expired',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prismaMock.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-expired' },
+      data: { status: BookingStatus.EXPIRED },
+    });
   });
 
   it('is idempotent when payment intent is already PAID', async () => {
