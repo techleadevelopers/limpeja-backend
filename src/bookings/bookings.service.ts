@@ -1363,6 +1363,11 @@ export class BookingsService {
         newProvider: providerCompletedBookings < 5,
       },
     });
+    if (insuranceOptions.length === 0) {
+      this.logger.warn(
+        `[BookingsService] quote - No insurance plans available for provider ${provider.id} in ${createBookingDto.address.city} (${providerService.serviceId}).`,
+      );
+    }
     const requestedInsurancePlan = insurancePlanId
       ? insuranceOptions.find((plan) => plan.id === insurancePlanId)
       : null;
