@@ -720,6 +720,37 @@ export class PaymentsService {
         );
       }
 
+      const pendingStatuses = new Set<BookingStatus>([
+        BookingStatus.PENDING_PAYMENT,
+        BookingStatus.PENDING,
+      ]);
+      if (!pendingStatuses.has(booking.status)) {
+        this.logger.warn(
+          `[PaymentsService] Booking ${booking.id} status ${booking.status} not eligible for payment confirmation.`,
+        );
+        pixWebhookSuccessCounter.inc({ reason: 'invalid_booking_status' });
+        timer({ outcome: 'success' });
+        return {
+          success: true,
+          didUpdate: false,
+          bookingId: booking.id,
+          paymentIntentId: intent.id,
+        };
+      }
+
+      if (booking.expiresAt && booking.expiresAt <= new Date()) {
+        await this.prisma.booking.update({
+          where: { id: booking.id },
+          data: { status: BookingStatus.EXPIRED },
+        });
+        this.logger.warn(
+          `[PaymentsService] Booking ${booking.id} expired before confirmation.`,
+        );
+        pixWebhookFailureCounter.inc({ reason: 'booking_expired_before_confirmation' });
+        timer({ outcome: 'failure' });
+        throw new BadRequestException('payment-expired');
+      }
+
       const providerUserId = booking.provider?.userId;
       if (!providerUserId) {
         throw new InternalServerErrorException(
@@ -731,6 +762,10 @@ export class PaymentsService {
         await tx.paymentIntent.update({
           where: { id: intent.id },
           data: { status: PaymentIntentStatus.PAID },
+        });
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { expiresAt: null },
         });
 
         const existingHold = await tx.ledgerEntry.findFirst({
