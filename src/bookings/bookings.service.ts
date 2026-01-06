@@ -118,6 +118,9 @@ const CANCELLATION_COOLDOWN_MS = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 })();
 
+const PENDING_PAYMENT_TIMEOUT_MINUTES = 20;
+const PENDING_PAYMENT_TIMEOUT_MS = PENDING_PAYMENT_TIMEOUT_MINUTES * 60_000;
+
 export type BookingWithDetailsRelations = Prisma.BookingGetPayload<{
   include: typeof DEFAULT_BOOKING_DETAILS_INCLUDE;
 }>;
@@ -953,6 +956,10 @@ export class BookingsService {
         scheduledStart.getTime() + durationMinutes * 60_000,
       );
 
+      const pendingPaymentExpiresAt = new Date(
+        Date.now() + PENDING_PAYMENT_TIMEOUT_MS,
+      );
+
       const { weekStart, weekEnd } = this.getSaoPauloWeekRange(scheduledStart);
       // ✅ overlap check (ANTES de criar address/booking e aplicar cupom)
       const overlap = await this.prisma.booking.findFirst({
@@ -1030,7 +1037,8 @@ export class BookingsService {
 
                   totalPrice: calculatedTotalPrice,
                   notes: createBookingDto.notes,
-                  status: BookingStatus.PENDING,
+                  status: BookingStatus.PENDING_PAYMENT,
+                  expiresAt: pendingPaymentExpiresAt,
                   addressId: newAddress.id,
                   couponId: couponId,
                   discountAmount: discountAmount,
@@ -1586,21 +1594,22 @@ export class BookingsService {
       );
     }
 
-    return this.prisma.booking.create({
-      data: {
-        clientId: data.clientId,
-        providerId: data.providerId,
-        providerServiceId: data.providerServiceId,
+      return this.prisma.booking.create({
+        data: {
+          clientId: data.clientId,
+          providerId: data.providerId,
+          providerServiceId: data.providerServiceId,
         scheduledDate: new Date(`${data.scheduledDate}T00:00:00.000Z`),
         scheduledTime: data.scheduledTime,
         scheduledStart,
         durationMinutes,
-        scheduledEnd,
-        totalPrice: new Prisma.Decimal(data.totalPrice),
-        subscriptionId: data.subscriptionId,
-        addressId: data.addressId,
-        status: BookingStatus.PENDING,
-      },
+          scheduledEnd,
+          totalPrice: new Prisma.Decimal(data.totalPrice),
+          subscriptionId: data.subscriptionId,
+          addressId: data.addressId,
+          status: BookingStatus.PENDING_PAYMENT,
+          expiresAt: new Date(Date.now() + PENDING_PAYMENT_TIMEOUT_MS),
+        },
       include: {
         client: { include: { user: true } },
         provider: { include: { user: true } },
@@ -1635,6 +1644,7 @@ export class BookingsService {
         status: {
           in: [
             BookingStatus.PENDING,
+            BookingStatus.PENDING_PAYMENT,
             BookingStatus.CONFIRMED,
             BookingStatus.STARTED,
           ],
