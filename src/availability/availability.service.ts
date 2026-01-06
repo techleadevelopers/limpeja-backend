@@ -133,8 +133,9 @@ export class AvailabilityService {
             BookingStatus.CONFIRMED,
             BookingStatus.FINISHED,
             BookingStatus.STARTED,
-            BookingStatus.PENDING, // incluir pendentes (aguardando pagamento)
-          ], // Include IN_PROGRESS
+            BookingStatus.PENDING,
+            BookingStatus.PENDING_PAYMENT,
+          ],
         },
       },
       select: {
@@ -205,6 +206,7 @@ export class AvailabilityService {
           status: {
             in: [
               BookingStatus.PENDING,
+              BookingStatus.PENDING_PAYMENT,
               BookingStatus.CONFIRMED,
               BookingStatus.STARTED,
               BookingStatus.FINISHED,
@@ -352,14 +354,15 @@ export class AvailabilityService {
     const overlappingBooking = await this.prisma.booking.findFirst({
       where: {
         providerId,
-        status: {
-          in: [
-            BookingStatus.PENDING,
-            BookingStatus.CONFIRMED,
-            BookingStatus.STARTED,
-            BookingStatus.FINISHED,
-          ],
-        },
+          status: {
+            in: [
+              BookingStatus.PENDING,
+              BookingStatus.PENDING_PAYMENT,
+              BookingStatus.CONFIRMED,
+              BookingStatus.STARTED,
+              BookingStatus.FINISHED,
+            ],
+          },
         scheduledDate: { gte: nowStart },
       },
       select: {
