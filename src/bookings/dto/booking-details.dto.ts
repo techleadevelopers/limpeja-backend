@@ -751,7 +751,6 @@ export class BookingDetailsDto {
         ? data.scheduledDate.toISOString().split('T')[0]
         : data.scheduledDate.split('T')[0];
     const scheduledTimeIso = (() => {
-      if (data.scheduledTime instanceof Date) return data.scheduledTime.toISOString();
       if (typeof data.scheduledTime === 'string') {
         if (data.scheduledTime.includes('T')) return data.scheduledTime;
         return `${this.scheduledDate}T${data.scheduledTime}:00Z`;
