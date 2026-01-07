@@ -554,7 +554,7 @@ model Booking {
 
   // Agendamento
   scheduledDate    DateTime
-  scheduledTime    String
+  scheduledTime    DateTime
   scheduledStart   DateTime?
   durationMinutes  Int?
   scheduledEnd     DateTime?        // ✅ NOVO: derivado (scheduledStart + durationMinutes)
