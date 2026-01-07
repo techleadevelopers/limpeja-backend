@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { User, Prisma } from '@prisma/client';
+import { formatScheduledTime } from '../bookings/booking-time.utils';
 
 @Injectable()
 export class ComplianceService {
@@ -165,7 +166,7 @@ export class ComplianceService {
       providerName: booking.provider.fullName,
       clientName: booking.client.fullName,
       scheduledDate: booking.scheduledDate.toISOString().split('T')[0],
-      scheduledTime: booking.scheduledTime,
+      scheduledTime: formatScheduledTime(booking.scheduledTime),
       address: `${booking.address.street}, ${booking.address.number}, ${booking.address.neighborhood}, ${booking.address.city} - ${booking.address.state}`,
       items: [
         {
