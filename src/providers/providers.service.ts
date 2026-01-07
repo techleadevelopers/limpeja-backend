@@ -62,14 +62,8 @@ export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
 type ProviderForBadgeUpdate = Prisma.ProviderGetPayload<{
   include: {
     user: { select: { isVerified: true } };
-    bookings: {
-      where: { status: 'FINISHED' };
-      select: { clientId: true };
-    };
-    reviewsReceived: {
-      where: { booking: { status: 'FINISHED' } };
-      include: { booking: { select: { status: true } } };
-    };
+    bookings: { where: { status: 'FINISHED' } }; // ✅ CORRIGIDO
+    reviewsReceived: { where: { rating: { gte: 4 } } };
   };
 }>;
 
@@ -171,17 +165,9 @@ export interface ProviderMetrics {
 export class ProvidersService {
   private readonly logger = new Logger(ProvidersService.name);
   private readonly PROVIDERS_CACHE_KEY = 'all_approved_providers';
+  private readonly PROVIDER_METRICS_CACHE_KEY = 'provider_metrics';
+  private readonly PROVIDER_METRICS_CACHE_TTL_SECONDS = 5 * 60;
   private readonly PUBLIC_PROVIDERS_CACHE_TTL_SECONDS = 60;
-  private static readonly BADGE_MIN_COMPLETED_BOOKINGS = 5;
-  private static readonly BADGE_MIN_UNIQUE_CLIENTS = 5;
-  private static readonly HIGH_VOLUME_BOOKINGS_THRESHOLD = 50;
-  private static readonly AVAILABILITY_BUSY_THRESHOLD = 0.7;
-  private static readonly AVAILABILITY_LOOKBACK_DAYS = 7;
-  private static readonly AVAILABILITY_RECENT_BOOKING_STATUSES: BookingStatus[] = [
-    BookingStatus.CONFIRMED,
-    BookingStatus.STARTED,
-    BookingStatus.FINISHED,
-  ];
 
   constructor(
     private prisma: PrismaService,
@@ -1220,8 +1206,8 @@ export class ProvidersService {
                 "Service" s ON ps."serviceId" = s.id
             LEFT JOIN
                 "Review" r ON p.id = r."providerId"
-            WHERE
-                p."verificationStatus" = ${Prisma.raw(`'${VerificationStatus.APPROVED}'`)} AND
+                WHERE
+                    p."verificationStatus"::text = ${Prisma.raw(`'${VerificationStatus.APPROVED}'`)} AND
                 CASE
                   WHEN a.location IS NOT NULL THEN
                     ST_DWithin(
@@ -1558,83 +1544,6 @@ export class ProvidersService {
     return this.search(searchDto);
   }
 
-  async getProvidersAvailabilitySummary(
-    latitude?: number,
-    longitude?: number,
-    radiusKm?: number,
-  ): Promise<{ availableProvidersCount: number; busy: boolean }> {
-    const safeLatitude = Number(latitude);
-    const safeLongitude = Number(longitude);
-    const safeRadius = Number(radiusKm);
-
-    if (
-      !Number.isFinite(safeLatitude) ||
-      !Number.isFinite(safeLongitude) ||
-      !Number.isFinite(safeRadius)
-    ) {
-      throw new BadRequestException(
-        'Latitude, longitude e radius são obrigatórios para o resumo de disponibilidade.',
-      );
-    }
-
-    const radiusMeters = Math.max(safeRadius, 0) * 1000;
-    const referencePoint = Prisma.sql`
-      ST_SetSRID(ST_MakePoint(${safeLongitude}, ${safeLatitude}), 4326)::geography
-    `;
-
-    const providersInRange = await this.prisma.$queryRaw<
-      { providerId: string }[]
-    >`
-      SELECT DISTINCT p.id AS "providerId"
-      FROM "Provider" p
-      JOIN "Address" a ON a."providerId" = p.id
-      WHERE p."verificationStatus"::text = ${VerificationStatus.APPROVED}::text
-        AND (
-          a.location IS NOT NULL
-          OR (a.latitude IS NOT NULL AND a.longitude IS NOT NULL)
-        )
-        AND ST_Distance(
-          CASE
-            WHEN a.location IS NOT NULL THEN a.location::geography
-            ELSE
-              ST_SetSRID(
-                ST_MakePoint(a.longitude::double precision, a.latitude::double precision),
-                4326
-              )::geography
-          END,
-          ${referencePoint}
-        ) <= ${radiusMeters}
-    `;
-
-    const providerIds = providersInRange.map((row) => row.providerId);
-    const availableProvidersCount = providerIds.length;
-    if (availableProvidersCount === 0) {
-      return { availableProvidersCount: 0, busy: false };
-    }
-
-    const windowStart = new Date();
-    windowStart.setDate(
-      windowStart.getDate() - ProvidersService.AVAILABILITY_LOOKBACK_DAYS,
-    );
-
-    const recentProviders = await this.prisma.booking.groupBy({
-      by: ['providerId'],
-      where: {
-        providerId: { in: providerIds },
-        scheduledDate: { gte: windowStart },
-        status: {
-          in: ProvidersService.AVAILABILITY_RECENT_BOOKING_STATUSES,
-        },
-      },
-    });
-
-    const busy =
-      recentProviders.length / availableProvidersCount >=
-      ProvidersService.AVAILABILITY_BUSY_THRESHOLD;
-
-    return { availableProvidersCount, busy };
-  }
-
   // CORREÇÃO: Agora aceita latitude/longitude opcionais pra calcular distance (via raw query PostGIS)
   async findTopRatedOrExperiencedProviders(
     latitude?: number,
@@ -1759,7 +1668,7 @@ export class ProvidersService {
         LEFT JOIN
             "Review" r ON p.id = r."providerId"
         WHERE
-            p."verificationStatus" = ${Prisma.raw(`'${VerificationStatus.APPROVED}'`)}
+            p."verificationStatus"::text = ${Prisma.raw(`'${VerificationStatus.APPROVED}'`)}
         GROUP BY
             p.id, u.email, u.role, u."isVerified", u."fullName", u."phone", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus"
         ORDER BY
@@ -1978,11 +1887,9 @@ export class ProvidersService {
         user: { select: { isVerified: true } },
         bookings: {
           where: { status: 'FINISHED' },
-          select: { clientId: true },
         },
         reviewsReceived: {
-          where: { booking: { status: 'FINISHED' } },
-          include: { booking: { select: { status: true } } },
+          where: { rating: { gte: 4 } },
         },
       },
     })) as ProviderForBadgeUpdate;
@@ -1992,41 +1899,25 @@ export class ProvidersService {
       return;
     }
 
-    const reviewsForRating = provider.reviewsReceived ?? [];
+    const newBadges: string[] = [];
+    const completedBookingsCount = provider.bookings.length;
+    const fiveStarReviewCount = provider.reviewsReceived.filter(
+      (r) => r.rating === 5,
+    ).length;
     const averageRating =
-      reviewsForRating.length > 0
-        ? reviewsForRating.reduce((sum, r) => sum + r.rating, 0) /
-          reviewsForRating.length
+      provider.reviewsReceived.length > 0
+        ? provider.reviewsReceived.reduce((sum, r) => sum + r.rating, 0) /
+          provider.reviewsReceived.length
         : 0;
 
-    const completedBookings = provider.bookings ?? [];
-    const completedBookingsCount = completedBookings.length;
-    const uniqueClientIds = completedBookings
-      .map((booking) => booking.clientId)
-      .filter((clientId): clientId is string => Boolean(clientId));
-    const uniqueClientsCount = new Set(uniqueClientIds).size;
-    const meetsBadgeThreshold =
-      completedBookingsCount >=
-        ProvidersService.BADGE_MIN_COMPLETED_BOOKINGS &&
-      uniqueClientsCount >= ProvidersService.BADGE_MIN_UNIQUE_CLIENTS;
-
-    const newBadges: string[] = [];
-    if (meetsBadgeThreshold) {
-      if (provider.user.isVerified) {
-        newBadges.push('VERIFIED');
-      }
-      const fiveStarReviewCount = reviewsForRating.filter(
-        (r) => r.rating === 5,
-      ).length;
-      if (averageRating >= 4.5 && fiveStarReviewCount >= 10) {
-        newBadges.push('TOP_RATED');
-      }
-      if (
-        completedBookingsCount >=
-        ProvidersService.HIGH_VOLUME_BOOKINGS_THRESHOLD
-      ) {
-        newBadges.push('HIGH_VOLUME');
-      }
+    if (provider.user.isVerified) {
+      newBadges.push('VERIFIED');
+    }
+    if (averageRating >= 4.5 && fiveStarReviewCount >= 10) {
+      newBadges.push('TOP_RATED');
+    }
+    if (completedBookingsCount >= 50) {
+      newBadges.push('HIGH_VOLUME');
     }
     // TODO: Adicionar badges de gamificação (ex: "Missão Concluída", "Streak")
 
@@ -2185,6 +2076,7 @@ export class ProvidersService {
     await this.cacheService.del(
       `${this.PROVIDERS_CACHE_KEY}:top_rated_experienced`,
     );
+    await this.cacheService.del(`${this.PROVIDER_METRICS_CACHE_KEY}:${providerId}`);
     // Telemetria: provider_metrics_updated
     this.logger.log(
       `[TELEMETRY] provider_metrics_updated: { providerId: ${providerId}, acceptanceRate: ${acceptanceRate.toFixed(2)}, averageResponseTime: ${averageResponseTime} }`,
@@ -2195,6 +2087,15 @@ export class ProvidersService {
   async getProviderPerformanceMetrics(
     providerId: string,
   ): Promise<ProviderMetrics> {
+    const cacheKey = `${this.PROVIDER_METRICS_CACHE_KEY}:${providerId}`;
+    const cachedMetrics = await this.cacheService.get<ProviderMetrics>(cacheKey);
+    if (cachedMetrics) {
+      this.logger.debug(
+        `[ProvidersService] getProviderPerformanceMetrics: Cache HIT para ${providerId}.`,
+      );
+      return cachedMetrics;
+    }
+
     this.logger.log(
       `[ProvidersService] getProviderPerformanceMetrics: Buscando métricas para provedor ${providerId}.`,
     );
@@ -2217,7 +2118,7 @@ export class ProvidersService {
       );
     }
 
-    return {
+    const metrics: ProviderMetrics = {
       acceptanceRate:
         provider.acceptanceRate !== null
           ? Math.round(provider.acceptanceRate)
@@ -2228,6 +2129,14 @@ export class ProvidersService {
           : 0,
       totalBookings: provider.bookings.length,
     };
+
+    await this.cacheService.set(
+      cacheKey,
+      metrics,
+      this.PROVIDER_METRICS_CACHE_TTL_SECONDS,
+    );
+
+    return metrics;
   }
 
   // NEW METHOD: Get offers for a provider
