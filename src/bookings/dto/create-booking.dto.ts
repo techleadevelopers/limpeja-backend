@@ -1,5 +1,4 @@
 // backend-cleaning/src/bookings/dto/create-booking.dto.ts
-// backend-cleaning/src/bookings/dto/create-booking.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsString,
@@ -9,13 +8,12 @@ import {
   Min,
   IsOptional,
   IsUUID,
-  Matches,
   ValidateNested,
   IsInt,
   IsDefined,
   IsArray,
   IsIn,
-} from 'class-validator'; // <-- Adicione IsDefined aqui!
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateAddressDto } from '../../common/dto/create-address.dto';
 import { MIN_HOURLY_MINUTES } from '../../common/constants/pricing';
@@ -61,23 +59,19 @@ export class CreateBookingDto {
   providerServiceId: string;
 
   @ApiProperty({
-    description:
-      'Data agendada para o serviço (formato ISO 8601, ex: 2025-06-15)',
-    example: '2025-06-15',
+    description: 'Data agendada para o serviço (formato ISO 8601)',
+    example: '2026-01-15',
   })
   @IsDateString()
   @IsNotEmpty()
   scheduledDate: string;
 
   @ApiProperty({
-    description: 'Horário agendado para o serviço (formato HH:mm)',
-    example: '10:00',
+    description: 'Horário agendado para o serviço (ISO completo para evitar travamentos)',
+    example: '2026-01-15T10:00:00.000Z',
   })
-  @IsString()
+  @IsDateString() // Mudado de @IsString/@Matches para @IsDateString
   @IsNotEmpty()
-  @Matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, {
-    message: 'scheduledTime deve estar no formato HH:mm',
-  })
   scheduledTime: string;
 
   @ApiProperty({ description: 'Preço total do agendamento', example: 150.0 })
@@ -94,7 +88,7 @@ export class CreateBookingDto {
   notes?: string;
 
   @ApiProperty({ description: 'Endereço onde o serviço será realizado' })
-  @IsDefined({ message: 'O endereço é obrigatório.' }) // Adicione esta linha
+  @IsDefined({ message: 'O endereço é obrigatório.' })
   @ValidateNested()
   @Type(() => CreateAddressDto)
   address: CreateAddressDto;
@@ -108,7 +102,6 @@ export class CreateBookingDto {
   @Min(MIN_HOURLY_MINUTES)
   requestedDurationMinutes?: number;
 
-  // PROPRIEDADE ADICIONADA PARA RESOLVER OS ERROS DO 'couponCode'
   @ApiPropertyOptional({
     description: 'Código do cupom de desconto, se aplicável',
     example: 'DESCONTO10',
@@ -157,7 +150,7 @@ export class CreateBookingDto {
   })
   @IsOptional()
   @IsString()
-  quoteHash?: string;
+  quoteIdHash?: string;
 
   @ApiPropertyOptional({
     description: 'Validade da cotação (ISO string)',
