@@ -14,6 +14,9 @@ import {
   SAO_PAULO_TIMEZONE_OFFSET_MS,
 } from './timezone';
 import { Availability, BookingStatus } from '@prisma/client';
+import {
+  scheduledTimeToMinutes,
+} from '../bookings/booking-time.utils';
 
 // Garante que os horários configurados sejam sempre "cheios" (ex.: 09:00, 10:00)
 const assertFullHour = (label: string, time: string) => {
@@ -52,10 +55,9 @@ const SLOT_HOLD_STRIKE_THRESHOLD = Math.max(
 export class AvailabilityService {
   constructor(private prisma: PrismaService) {}
 
-  // Converte HH:mm para minutos desde 00:00
-  private toMinutes(time: string): number {
-    const [h, m] = time.split(':').map((n) => parseInt(n, 10) || 0);
-    return h * 60 + m;
+  // Converte HH:mm (ou Date) para minutos desde 00:00
+  private toMinutes(time?: string | Date | null): number {
+    return scheduledTimeToMinutes(time);
   }
 
   async getAvailability(
