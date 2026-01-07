@@ -268,8 +268,11 @@ export class BookingDetailsDto {
   @IsString()
   scheduledDate: string;
 
-  @ApiProperty({ description: 'Hora agendada (HH:mm)', example: '09:00' })
-  @IsString()
+  @ApiProperty({
+    description: 'Timestamp ISO do início agendado (horário completo).',
+    example: '2025-07-01T09:00:00.000Z',
+  })
+  @IsISO8601()
   scheduledTime: string;
 
   @ApiProperty({
@@ -747,7 +750,15 @@ export class BookingDetailsDto {
       data.scheduledDate instanceof Date
         ? data.scheduledDate.toISOString().split('T')[0]
         : data.scheduledDate.split('T')[0];
-    this.scheduledTime = data.scheduledTime;
+    const scheduledTimeIso = (() => {
+      if (data.scheduledTime instanceof Date) return data.scheduledTime.toISOString();
+      if (typeof data.scheduledTime === 'string') {
+        if (data.scheduledTime.includes('T')) return data.scheduledTime;
+        return `${this.scheduledDate}T${data.scheduledTime}:00Z`;
+      }
+      return `${this.scheduledDate}T00:00:00Z`;
+    })();
+    this.scheduledTime = scheduledTimeIso;
     this.status = data.status;
     this.statusLabel = statusLabelMap[data.status] || data.status;
     this.allowedActions = data.allowedActions ?? [];
@@ -870,7 +881,7 @@ export class BookingDetailsDto {
       this.isReviewed = false;
     }
 
-    this.scheduledDateTime = `${this.scheduledDate}T${this.scheduledTime}:00Z`;
+    this.scheduledDateTime = this.scheduledStart ?? this.scheduledTime;
     // Estimativa de término: usa startedAt se houver, senão scheduledStart/durationMinutes
     const baseEnd = this.startedAt
       ? new Date(this.startedAt)
