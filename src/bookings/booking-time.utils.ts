@@ -82,3 +82,24 @@ export function calculateExpectedEnd(info: BookingScheduleInfo): Date {
 
   return new Date(base.getTime() + durationMinutes * 60 * 1000);
 }
+
+export function formatScheduledTime(value?: string | Date | null): string {
+  if (!value) return '00:00';
+  if (value instanceof Date) {
+    return value.toISOString().slice(11, 16);
+  }
+  if (typeof value === 'string') {
+    if (value.includes('T')) {
+      const [, timePart] = value.split('T');
+      return timePart.slice(0, 5);
+    }
+    return value;
+  }
+  return '00:00';
+}
+
+export function scheduledTimeToMinutes(value?: string | Date | null): number {
+  const hhmm = formatScheduledTime(value);
+  const [hh, mm] = hhmm.split(':').map((n) => parseInt(n, 10) || 0);
+  return hh * 60 + mm;
+}
