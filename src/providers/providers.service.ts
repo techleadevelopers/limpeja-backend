@@ -27,6 +27,7 @@ import { UpdateProviderProfileDto } from './dto/update-provider-profile.dto';
 import { Decimal } from '@prisma/client/runtime/library';
 import { geocodeAddress } from '../utils/geocoding.service';
 import { SettingsService } from '../settings/settings.service';
+import { formatScheduledTime } from '../bookings/booking-time.utils';
 
 // Type principal para provedores com todas as inclusões necessárias para mapeamento
 export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
@@ -385,7 +386,7 @@ export class ProvidersService {
         // Encontrar primeiro slot livre
         for (const slot of availability) {
           const isOccupied = occupiedTimes.some(
-            (b) => b.scheduledTime === slot.startTime,
+            (b) => formatScheduledTime(b.scheduledTime) === slot.startTime,
           );
           if (!isOccupied) {
             nextSlot = { date: dateStr, time: slot.startTime };
@@ -459,8 +460,14 @@ export class ProvidersService {
           description: ps.service.description,
           icon: ps.service.icon,
           price: ps.service.price ? ps.service.price.toNumber() : 0,
-          createdAt: ps.service.createdAt.toISOString(),
-          updatedAt: ps.service.updatedAt.toISOString(),
+          createdAt:
+            ps.service.createdAt instanceof Date
+              ? ps.service.createdAt.toISOString()
+              : ps.service.createdAt,
+          updatedAt:
+            ps.service.updatedAt instanceof Date
+              ? ps.service.updatedAt.toISOString()
+              : ps.service.updatedAt,
         },
         createdAt: ps.createdAt.toISOString(),
         updatedAt: ps.updatedAt.toISOString(),
