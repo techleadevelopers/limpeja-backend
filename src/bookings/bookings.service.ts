@@ -53,6 +53,7 @@ import { BOOKING_STATUS_TRANSITIONS } from './booking-status.constants';
 import {
   calculateExpectedEnd,
   calculateScheduledAtInSaoPaulo,
+  formatScheduledTime,
 } from './booking-time.utils';
 import {
   BookingAction,
@@ -955,6 +956,7 @@ export class BookingsService {
       const scheduledEnd = new Date(
         scheduledStart.getTime() + durationMinutes * 60_000,
       );
+      const scheduledTimeValue = scheduledStart;
 
       const pendingPaymentExpiresAt = new Date(
         Date.now() + PENDING_PAYMENT_TIMEOUT_MS,
@@ -1029,7 +1031,7 @@ export class BookingsService {
                   scheduledDate: new Date(
                     `${createBookingDto.scheduledDate}T00:00:00.000Z`,
                   ),
-                  scheduledTime: createBookingDto.scheduledTime,
+                  scheduledTime: scheduledTimeValue,
 
                   scheduledStart,
                   durationMinutes,
@@ -1725,6 +1727,7 @@ export class BookingsService {
     userId: string,
     role: UserRole,
     status?: string,
+    dateRange?: { start?: Date; end?: Date },
     request?: Request,
   ): Promise<BookingWithAllowedActions[]> {
     this.logger.log(
@@ -1786,6 +1789,16 @@ export class BookingsService {
           `[BookingsService] findUserBookings: Status inválido recebido: "${status}". Ignorando filtro de status.`,
         );
       }
+    }
+
+    if (dateRange && (dateRange.start || dateRange.end)) {
+      const scheduledFilter: Prisma.DateTimeFilter = {};
+      if (dateRange.start) scheduledFilter.gte = dateRange.start;
+      if (dateRange.end) scheduledFilter.lte = dateRange.end;
+      whereClause.scheduledTime = scheduledFilter;
+      this.logger.log(
+        `[BookingsService] findUserBookings: Filtrando por range de tempo: start=${dateRange.start?.toISOString() ?? 'undefined'} end=${dateRange.end?.toISOString() ?? 'undefined'}`,
+      );
     }
 
     this.logger.log(
@@ -2385,9 +2398,9 @@ export class BookingsService {
           updatedBooking.scheduledTime,
         );
         if (!Number.isNaN(scheduledAt.getTime())) {
-          const [hh, mm] = String(updatedBooking.scheduledTime || '00:00')
-            .split(':')
-            .map((n) => parseInt(n, 10));
+        const [hh, mm] = formatScheduledTime(updatedBooking.scheduledTime)
+          .split(':')
+          .map((n) => parseInt(n, 10));
           await this.schedulerService.scheduleBookingReminders({
             bookingId: updatedBooking.id,
             clientUserId: updatedBooking.client?.userId ?? '',
