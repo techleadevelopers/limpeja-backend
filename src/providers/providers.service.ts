@@ -275,6 +275,66 @@ export class ProvidersService {
     return filtered;
   }
 
+  async getProvidersAvailabilitySummary(
+    latitude: number,
+    longitude: number,
+    radiusKm: number,
+  ): Promise<{ availableProvidersCount: number; busy: boolean }> {
+    const safeLat = Number(latitude);
+    const safeLon = Number(longitude);
+    const safeRadius = Number(radiusKm);
+    if (
+      !Number.isFinite(safeLat) ||
+      !Number.isFinite(safeLon) ||
+      !Number.isFinite(safeRadius)
+    ) {
+      throw new BadRequestException(
+        'Latitude, longitude e radius devem ser números válidos.',
+      );
+    }
+
+    const radiusMeters = Math.max(safeRadius, 0) * 1000;
+
+    this.logger.log(
+      `[ProvidersService] getProvidersAvailabilitySummary: calculando para lat=${safeLat}, lon=${safeLon}, radius=${safeRadius}km`,
+    );
+
+    const providers = await this.prisma.provider.findMany({
+      where: { verificationStatus: VerificationStatus.APPROVED },
+      select: {
+        id: true,
+        address: {
+          select: { latitude: true, longitude: true },
+        },
+        availability: {
+          where: { isAvailable: true },
+          select: { id: true },
+        },
+      },
+    });
+
+    const availableProvidersCount = providers.filter((provider) => {
+      const lat = provider.address?.latitude;
+      const lon = provider.address?.longitude;
+      if (lat == null || lon == null) return false;
+      if (!provider.availability.length) return false;
+      const distance = this.calculateDistanceMeters(
+        safeLat,
+        safeLon,
+        lat,
+        lon,
+      );
+      return distance !== undefined && distance <= radiusMeters;
+    }).length;
+
+    const busy = availableProvidersCount < 3;
+
+    return {
+      availableProvidersCount,
+      busy,
+    };
+  }
+
   private async updateAddressLocationPoint(
     addressId: string,
     latitude?: number,
