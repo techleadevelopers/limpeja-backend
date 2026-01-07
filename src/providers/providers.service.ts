@@ -1301,12 +1301,18 @@ export class ProvidersService {
         providersWithDistance = await Promise.all(
           rawProviders.map(async (rp: any) => {
             // Mapeamento para ProviderWithIncludes (incluindo novos campos)
-            const providerWithIncludes: ProviderWithIncludes = {
-              id: rp.id,
-              userId: rp.userId,
-              fullName: rp.fullName,
-              cpf: rp.cpf,
-              dateOfBirth: rp.dateOfBirth,
+        const toDate = (value: any) => {
+          if (!value) return undefined;
+          const date = new Date(value);
+          return Number.isNaN(date.getTime()) ? undefined : date;
+        };
+
+        const providerWithIncludes: ProviderWithIncludes = {
+          id: rp.id,
+          userId: rp.userId,
+          fullName: rp.fullName,
+          cpf: rp.cpf,
+          dateOfBirth: toDate(rp.dateOfBirth) ?? null,
               phone: rp.phone || rp.user_phone || null,
               yearsOfExperience: rp.yearsOfExperience,
               avatarUrl: rp.avatarUrl,
@@ -1314,8 +1320,8 @@ export class ProvidersService {
               verificationStatus: rp.verificationStatus, // NOVO
               pixKey: rp.pixKey,
               pixKeyMasked: rp.pixKeyMasked,
-              createdAt: rp.createdAt,
-              updatedAt: rp.updatedAt,
+              createdAt: toDate(rp.createdAt) ?? new Date(),
+              updatedAt: toDate(rp.updatedAt) ?? new Date(),
               documentPhotoFrontUrl: rp.documentPhotoFrontUrl,
               documentPhotoBackUrl: rp.documentPhotoBackUrl,
               selfieWithDocumentUrl: rp.selfieWithDocumentUrl,
@@ -1361,8 +1367,8 @@ export class ProvidersService {
                       ps.price != null ? new Decimal(ps.price) : new Decimal(0),
                     durationMinutes: ps.durationMinutes,
                     description: ps.description,
-                    createdAt: ps.createdAt,
-                    updatedAt: ps.updatedAt,
+                    createdAt: toDate(ps.createdAt) ?? new Date(),
+                    updatedAt: toDate(ps.updatedAt) ?? new Date(),
                     pricingType: ps.pricingType,
                     pricePerHour: ps.pricePerHour
                       ? new Decimal(ps.pricePerHour)
@@ -1382,8 +1388,8 @@ export class ProvidersService {
                         ps.service.price != null
                           ? new Decimal(ps.service.price)
                           : new Decimal(0),
-                      createdAt: ps.service.createdAt,
-                      updatedAt: ps.service.updatedAt,
+                      createdAt: toDate(ps.service.createdAt) ?? new Date(),
+                      updatedAt: toDate(ps.service.updatedAt) ?? new Date(),
                     },
                   }))
                 : [],
