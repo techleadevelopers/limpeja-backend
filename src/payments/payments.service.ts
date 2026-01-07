@@ -29,6 +29,7 @@ import * as fs from 'fs';
 import * as https from 'https';
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingsService } from '../bookings/bookings.service';
+import { formatScheduledTime } from '../bookings/booking-time.utils';
 import { QueuesService } from '../queues/queues.service';
 import {
   CreatePixChargeDto,
@@ -451,8 +452,7 @@ export class PaymentsService {
     // Dispara push físico após confirmação de pagamento (cliente e prestador)
     if (shouldNotifyPaymentConfirmed && bookingForNotification) {
       const b = bookingForNotification;
-      const hhmm = String(b.scheduledTime || '').split(':');
-      const hora = `${String(parseInt(hhmm[0] || '0', 10)).padStart(2, '0')}:${String(parseInt(hhmm[1] || '0', 10)).padStart(2, '0')}`;
+      const hora = formatScheduledTime(b.scheduledTime);
       const providerName = b.provider?.user?.fullName || 'Prestador';
       const clientName = b.client?.user?.fullName || 'Cliente';
       if (b.client?.userId) {
@@ -509,8 +509,7 @@ export class PaymentsService {
         }
         const b = intent.booking;
         if (b?.client?.userId) {
-          const hhmm = String(b.scheduledTime || '').split(':');
-          const hora = `${String(parseInt(hhmm[0] || '0', 10)).padStart(2, '0')}:${String(parseInt(hhmm[1] || '0', 10)).padStart(2, '0')}`;
+          const hora = formatScheduledTime(b.scheduledTime);
           await this.queues.addNotificationJob('send-notification', {
             userId: b.client.userId,
             kind: 'payment_failed',
@@ -1377,10 +1376,14 @@ export class PaymentsService {
     if (!booking.scheduledDate || !booking.scheduledTime) {
       return undefined;
     }
-    const timeSegment = booking.scheduledTime;
+    const scheduledDate =
+      booking.scheduledDate instanceof Date
+        ? booking.scheduledDate.toISOString().split('T')[0]
+        : booking.scheduledDate.split('T')[0];
+    const timeSegment = formatScheduledTime(booking.scheduledTime);
     const normalizedTime =
       timeSegment.split(':').length === 2 ? `${timeSegment}:00` : timeSegment;
-    const candidate = new Date(`${booking.scheduledDate}T${normalizedTime}`);
+    const candidate = new Date(`${scheduledDate}T${normalizedTime}`);
     if (Number.isNaN(candidate.getTime())) {
       return undefined;
     }
