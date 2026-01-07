@@ -18,8 +18,7 @@ export class BookingEntity implements PrismaBooking {
   providerId: string;
   providerServiceId: string;
   scheduledDate: Date;
-  scheduledTime: string;
-  expiresAt: Date | null;
+  scheduledTime: Date;
   // CORREÇÃO AQUI: status deve ser do tipo BookingStatus COMPLETO do Prisma
   status: BookingStatus; // <-- AGORA É BookingStatus, não um subconjunto
   totalPrice: Prisma.Decimal; // Tipo Prisma.Decimal para refletir o schema
@@ -118,9 +117,13 @@ export class BookingEntity implements PrismaBooking {
       this.scheduledDate = partial.scheduledDate;
     }
 
-    this.expiresAt = partial.expiresAt
-      ? new Date(partial.expiresAt as any)
-      : null;
+    if (partial.scheduledTime && typeof partial.scheduledTime === 'string') {
+      this.scheduledTime = new Date(partial.scheduledTime);
+    } else if (partial.scheduledTime instanceof Date) {
+      this.scheduledTime = partial.scheduledTime;
+    } else {
+      this.scheduledTime = new Date();
+    }
 
     // O status é atribuído diretamente, o TS agora deve aceitar o enum completo
     // Se partial.status for undefined, o tipo inferido será BookingStatus | undefined
