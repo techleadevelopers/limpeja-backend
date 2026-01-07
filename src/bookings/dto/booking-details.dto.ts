@@ -118,9 +118,9 @@ class BookingInsuranceSnapshotDto {
     this.riskMultiplierBps = data.riskMultiplierBps;
     this.proofRequired = data.proofRequired;
     this.createdAt =
-      data.createdAt instanceof Date
-        ? data.createdAt.toISOString()
-        : data.createdAt;
+      typeof data.createdAt === 'string'
+        ? data.createdAt
+        : data.createdAt.toISOString();
   }
 }
 
@@ -218,7 +218,9 @@ class BookingProofSnapshotDto {
     this.timestamps = toRecord(data.timestamps ?? null);
     this.userId = data.userId;
     this.createdAt =
-      data.createdAt instanceof Date ? data.createdAt.toISOString() : data.createdAt;
+      typeof data.createdAt === 'string'
+        ? data.createdAt
+        : data.createdAt.toISOString();
     this.latitude =
       typeof data.latitude === 'number' ? data.latitude : data.latitude ?? null;
     this.longitude =
@@ -228,9 +230,9 @@ class BookingProofSnapshotDto {
         ? data.accuracyMeters
         : data.accuracyMeters ?? null;
     this.capturedAt = data.capturedAt
-      ? data.capturedAt instanceof Date
-        ? data.capturedAt.toISOString()
-        : data.capturedAt
+      ? typeof data.capturedAt === 'string'
+        ? data.capturedAt
+        : data.capturedAt.toISOString()
       : null;
   }
 }
@@ -746,10 +748,11 @@ export class BookingDetailsDto {
     this.clientId = data.clientId;
     this.providerId = data.providerId;
     this.providerServiceId = data.providerServiceId;
-    this.scheduledDate =
-      data.scheduledDate instanceof Date
-        ? data.scheduledDate.toISOString().split('T')[0]
-        : data.scheduledDate.split('T')[0];
+    const scheduledDateIso =
+      typeof data.scheduledDate === 'string'
+        ? data.scheduledDate
+        : data.scheduledDate.toISOString();
+    this.scheduledDate = scheduledDateIso.split('T')[0];
     const scheduledTimeIso = (() => {
       if (typeof data.scheduledTime === 'string') {
         if (data.scheduledTime.includes('T')) return data.scheduledTime;
@@ -762,32 +765,32 @@ export class BookingDetailsDto {
     this.statusLabel = statusLabelMap[data.status] || data.status;
     this.allowedActions = data.allowedActions ?? [];
     this.scheduledStart = data.scheduledStart
-      ? data.scheduledStart instanceof Date
-        ? data.scheduledStart.toISOString()
-        : data.scheduledStart
+      ? typeof data.scheduledStart === 'string'
+        ? data.scheduledStart
+        : data.scheduledStart.toISOString()
       : null;
     this.durationMinutes =
       data.durationMinutes !== undefined ? data.durationMinutes : null;
     this.arrivedAt = data.arrivedAt
-      ? data.arrivedAt instanceof Date
-        ? data.arrivedAt.toISOString()
-        : data.arrivedAt
+      ? typeof data.arrivedAt === 'string'
+        ? data.arrivedAt
+        : data.arrivedAt.toISOString()
       : null;
     this.arrivedLat = toNumberValue(data.arrivedLat);
     this.arrivedLng = toNumberValue(data.arrivedLng);
     this.arrivedAccuracyM = toNumberValue(data.arrivedAccuracyM);
     this.startedAt = data.startedAt
-      ? data.startedAt instanceof Date
-        ? data.startedAt.toISOString()
-        : data.startedAt
+      ? typeof data.startedAt === 'string'
+        ? data.startedAt
+        : data.startedAt.toISOString()
       : null;
     this.startedLat = toNumberValue(data.startedLat);
     this.startedLng = toNumberValue(data.startedLng);
     this.startedAccuracyM = toNumberValue(data.startedAccuracyM);
     this.completedAt = data.completedAt
-      ? data.completedAt instanceof Date
-        ? data.completedAt.toISOString()
-        : data.completedAt
+      ? typeof data.completedAt === 'string'
+        ? data.completedAt
+        : data.completedAt.toISOString()
       : null;
     this.completedLat = toNumberValue(data.completedLat);
     this.completedLng = toNumberValue(data.completedLng);
@@ -798,13 +801,13 @@ export class BookingDetailsDto {
       : data.totalPrice;
     this.notes = data.notes === undefined ? null : data.notes;
     this.createdAt =
-      data.createdAt instanceof Date
-        ? data.createdAt.toISOString()
-        : data.createdAt;
+      typeof data.createdAt === 'string'
+        ? data.createdAt
+        : data.createdAt.toISOString();
     this.updatedAt =
-      data.updatedAt instanceof Date
-        ? data.updatedAt.toISOString()
-        : data.updatedAt;
+      typeof data.updatedAt === 'string'
+        ? data.updatedAt
+        : data.updatedAt.toISOString();
 
     this.addressId = data.addressId === undefined ? null : data.addressId;
     this.address = data.address
