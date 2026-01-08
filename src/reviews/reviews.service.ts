@@ -123,15 +123,7 @@ export class ReviewsService {
 
   private buildScheduledStart(booking: BookingWithRelationsForReview): Date {
     const baseDate = new Date(booking.scheduledDate);
-    const scheduledTimeValue = booking.scheduledTime ?? '00:00';
-    const scheduledTimeString =
-      scheduledTimeValue instanceof Date
-        ? scheduledTimeValue.toISOString()
-        : scheduledTimeValue;
-    const scheduledTimeToken = scheduledTimeString.includes('T')
-      ? scheduledTimeString.split('T')[1].slice(0, 5)
-      : scheduledTimeString;
-    const [hourStr = '0', minuteStr = '0'] = scheduledTimeToken
+    const [hourStr = '0', minuteStr = '0'] = (booking.scheduledTime ?? '00:00')
       .split(':')
       .map((value) => value.trim());
     const hour = Number.parseInt(hourStr, 10) || 0;
