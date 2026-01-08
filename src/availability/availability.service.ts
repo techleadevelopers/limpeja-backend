@@ -73,12 +73,8 @@ export class AvailabilityService {
   async getAvailability(
     providerId: string,
     query: GetAvailabilityDto,
-  ): Promise<{ available: Availability[]; occupiedTimes: string[] }> {
+  ): Promise<any> {
     const { date } = query;
-
-    console.log(
-      `[AvailabilityService] getAvailability chamado para providerId: ${providerId}, date: ${date}`,
-    ); // LOG 1
 
     const providerExists = await this.prisma.provider.findUnique({
       where: { id: providerId },
@@ -95,46 +91,30 @@ export class AvailabilityService {
       );
     }
 
-    // <<<< CORREÇÃO CRÍTICA AQUI >>>>
-    // Crie a data usando UTC para garantir que o dia da semana seja sempre o correto,
-    // independentemente do fuso horário do servidor.
     const { start: rangeStart, end: rangeEnd, dayOfWeek: actualDayOfWeek } =
       getSaoPauloDayRangeFromDateString(date);
 
-    console.log(
-      `[AvailabilityService] Data selecionada (UTC): ${rangeStart.toISOString().split('T')[0]}, Dia da Semana Calculado (UTC): ${actualDayOfWeek}`,
-    ); // LOG 2
-    console.log(
-      `[AvailabilityService] Dia da semana esperado (Para 10 de junho de 2025, deve ser 2 - Terça-feira): ${actualDayOfWeek}`,
-    ); // LOG 2.1 (Para depuração, remova depois)
+    // ✅ CORREÇÃO CRÍTICA: Usando queryRaw para forçar a conversão de Timestamp para String (HH:mm)
+    // Isso evita o erro "Error converting field startTime" do Prisma
+    const configuredAvailability: any[] = await this.prisma.$queryRaw`
+      SELECT 
+        id, 
+        "providerId", 
+        "dayOfWeek", 
+        TO_CHAR("startTime", 'HH24:MI') as "startTime",
+        TO_CHAR("endTime", 'HH24:MI') as "endTime",
+        "isAvailable"
+      FROM "Availability"
+      WHERE "providerId" = ${providerId} 
+      AND "dayOfWeek" = ${actualDayOfWeek}
+      AND "isAvailable" = true
+      ORDER BY "startTime" ASC
+    `;
 
-    const whereAvailability: any = {
-      providerId: providerId,
-      dayOfWeek: actualDayOfWeek, // <<<< Filtrando EXATAMENTE pelo dia da semana da data
-    };
-
-    console.log(
-      '[AvailabilityService] Condição WHERE para disponibilidade configurada:',
-      whereAvailability,
-    ); // LOG 3
-
-    // 1. Buscar todos os slots de disponibilidade CONFIGURADOS para aquele provedor e dia da semana.
-    const configuredAvailability = await this.prisma.availability.findMany({
-      where: whereAvailability, // Usa a condição construída acima
-      orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
-    });
-
-    console.log(
-      '[AvailabilityService] Resultado da consulta de disponibilidade configurada:',
-      configuredAvailability,
-    ); // LOG 4
-
-    // 2. Buscar agendamentos CONFIRMADOS para o provedor na DATA ESPECÍFICA fornecida.
+    // 2. Buscar agendamentos ocupados na data real (2026...)
     const bookingsOnDate = await this.prisma.booking.findMany({
       where: {
         providerId: providerId,
-        // A data agendada no Prisma também é tratada como um ponto no tempo.
-        // Para comparar apenas a data, podemos usar gte e lte do início ao fim do dia em UTC.
         scheduledDate: {
           gte: rangeStart,
           lte: rangeEnd,
@@ -148,19 +128,15 @@ export class AvailabilityService {
       },
     });
 
-    // --- CORREÇÃO TS2322: Garantindo conversão de Date para string ---
-    // Substitua o map atual por este:
-const occupiedTimes: string[] = bookingsOnDate.map((b) => {
-  // Use a utilitária que já importa o formatScheduledTime
-  return formatScheduledTime(b.scheduledTime); 
-});
+    const occupiedTimes: string[] = bookingsOnDate.map((b) => {
+      return formatScheduledTime(b.scheduledTime);
+    });
 
-    console.log(
-      '[AvailabilityService] Horários ocupados por agendamentos:',
-      occupiedTimes,
-    ); // LOG 5
-
-    return { available: configuredAvailability, occupiedTimes };
+    // Retornamos o objeto que o calendário e o ProvidersService esperam
+    return { 
+      available: configuredAvailability, 
+      occupiedTimes 
+    };
   }
 
   async updateAvailability(
@@ -217,14 +193,13 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
           `Intervalo inválido: ${startTime} deve ser menor que ${endTime}.`,
         );
       }
-      // Bloqueia edição de slots que já passaram no dia atual
+      
       if (dayOfWeek === todayDow && endMin <= minutesNow) {
         throw new BadRequestException(
           'Não é permitido alterar slot já passado.',
         );
       }
 
-      // Verifica conflito com bookings futuros (PENDING/CONFIRMED/IN_PROGRESS/COMPLETED)
       const overlappingBooking = futureBookings.find((booking) => {
         const bookingDow = getSaoPauloDayRangeFromTimestamp(
           booking.scheduledDate.getTime(),
@@ -232,13 +207,13 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
         const bookMin = this.toMinutes(booking.scheduledTime);
         return bookingDow === dayOfWeek && bookMin < endMin && bookMin >= startMin;
       });
+
       if (overlappingBooking) {
         throw new ConflictException(
           'Conflito com agendamento existente neste horário.',
         );
       }
 
-      // Verifica overlap com outros slots do mesmo dia
       const otherSlots = await this.prisma.availability.findMany({
         where: {
           providerId,
@@ -266,7 +241,7 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
           } catch (error) {
             if (error.code === 'P2025') {
               throw new NotFoundException(
-                `Slot de disponibilidade com ID "${id}" não encontrado para o provedor "${providerId}".`,
+                `Slot de disponibilidade não encontrado.`,
               );
             }
             throw error;
@@ -281,7 +256,7 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
           } catch (error) {
             if (error.code === 'P2025') {
               throw new NotFoundException(
-                `Slot de disponibilidade com ID "${id}" não encontrado para o provedor "${providerId}".`,
+                `Slot de disponibilidade não encontrado.`,
               );
             }
             throw error;
@@ -293,7 +268,7 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
         });
         if (existingSlot) {
           throw new ConflictException(
-            `Um slot de disponibilidade para ${dayOfWeek} das ${startTime} às ${endTime} já existe.`,
+            `Um slot de disponibilidade já existe.`,
           );
         }
         const newSlot = await this.prisma.availability.create({
@@ -352,19 +327,17 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
 
     if (existingSlot) {
       throw new ConflictException(
-        `Um slot de disponibilidade para ${dayOfWeek} das ${startTime} às ${endTime} já existe para este provedor.`,
+        `Um slot de disponibilidade para ${dayOfWeek} das ${startTime} às ${endTime} já existe.`,
       );
     }
 
-    // Conflito com bookings futuros
-    const nowStart = dayRange.start;
     const futureBookings = await this.prisma.booking.findMany({
       where: {
         providerId,
         status: {
           in: CONFLICT_BOOKING_STATUSES,
         },
-        scheduledDate: { gte: nowStart },
+        scheduledDate: { gte: dayRange.start },
       },
       select: {
         scheduledDate: true,
@@ -402,7 +375,7 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
   ): Promise<void> {
     const slotStart = start instanceof Date ? start : new Date(start);
     if (Number.isNaN(slotStart.getTime())) {
-      throw new BadRequestException('Horário inválido para o hold de slot.');
+      throw new BadRequestException('Horário inválido.');
     }
 
     const windowStart = new Date(Date.now() - SLOT_HOLD_STRIKE_WINDOW_MS);
@@ -417,7 +390,7 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
 
     if (strikeCount >= SLOT_HOLD_STRIKE_THRESHOLD) {
       throw new BadRequestException(
-        'Você cancelou este slot muitas vezes recentemente; escolha outro horário ou aguarde.',
+        'Cancelamentos excessivos para este slot.',
       );
     }
   }
@@ -433,7 +406,7 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
     } catch (error) {
       if (error.code === 'P2025') {
         throw new NotFoundException(
-          `Slot de disponibilidade com ID "${availabilityId}" não encontrado para o provedor "${providerId}".`,
+          `Slot não encontrado.`,
         );
       }
       throw error;
