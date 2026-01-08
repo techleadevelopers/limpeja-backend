@@ -120,6 +120,11 @@ export class AvailabilityService {
       AND "isAvailable" = true
       ORDER BY "startTime" ASC
     `;
+    console.log(
+      '[AvailabilityService] configuredAvailability',
+      actualDayOfWeek,
+      configuredAvailability.map((slot) => `${slot.startTime}-${slot.endTime} (${slot.isAvailable})`),
+    );
 
     // 2. Buscar agendamentos ocupados na data real (2026...)
     const bookingsOnDate = await this.prisma.booking.findMany({
