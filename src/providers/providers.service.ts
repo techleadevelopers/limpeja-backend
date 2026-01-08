@@ -54,15 +54,15 @@ export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
       };
     };
     bookings: {
-      where: { status: 'FINISHED' }; // â CORRIGIDO
-      orderBy: { createdAt: 'desc' };
-      take: 100;
-    };
-    availability: true; // NOVO: IncluÃ­do para cÃ¡lculo de nextAvailable
+      where: { status: 'FINISHED' },
+      select: { id: true }, // <--- MUDE AQUI (tira o take 100 e traga só o ID)
+    },
+   // availability: true, //
   };
 }> & {
   fiveStarReviewCount?: number;
   monthlyBookingsCount?: number;
+  rankingBoostScore?: number;
 };
 
 // Tipo especÃ­fico para a funÃ§Ã£o updateProviderBadges
@@ -175,6 +175,7 @@ export class ProvidersService {
   private readonly PROVIDER_METRICS_CACHE_KEY = 'provider_metrics';
   private readonly PROVIDER_METRICS_CACHE_TTL_SECONDS = 5 * 60;
   private readonly MONTHLY_BOOKINGS_COUNT_CACHE_TTL_SECONDS = 5 * 60;
+  private readonly RANKING_METRICS_CACHE_TTL_SECONDS = 5 * 60;
   private readonly PUBLIC_PROVIDERS_CACHE_TTL_SECONDS = 60;
 
   constructor(
@@ -401,32 +402,26 @@ export class ProvidersService {
         (sum, review) => sum + review.rating,
         0,
       ) || 0;
-  const averageRating =
-    provider.reviewsReceived?.length > 0
-      ? parseFloat((totalRating / provider.reviewsReceived.length).toFixed(1))
-      : 0;
 
-  const completedBookingsCount = provider.bookings?.length ?? 0;
+    const averageRating =
+      provider.reviewsReceived?.length > 0
+        ? parseFloat(
+            (totalRating / provider.reviewsReceived.length).toFixed(1),
+          )
+        : 0;
 
-  const formattedDateOfBirth = provider.dateOfBirth
+    const completedBookingsCount = provider.bookings?.length ?? 0;
+
+    const formattedDateOfBirth = provider.dateOfBirth
       ? provider.dateOfBirth.toISOString()
       : null;
     const formattedCreatedAt = provider.createdAt.toISOString();
     const formattedUpdatedAt = provider.updatedAt.toISOString();
 
-    // NOVO: Calcular rankingBoostScore (placeholder, alinhado com relatÃ³rio)
-    let rankingBoostScore = 0;
-    if (provider.badges?.includes('TOP_RATED')) {
-      rankingBoostScore += 0.05; // Exemplo: +beta
-    }
-    // TODO: Adicionar lÃ³gica para outros boosts (missÃµes, SLA chat)
-    // if (provider.hasActiveMissionBoost) rankingBoostScore += 0.03; // +gamma
-    // if (provider.meetsChatSla) rankingBoostScore += 0.02; // +delta
-
-    // CORREÃÃO TS2339: A propriedade 'nextAvailable' nÃ£o existe em ProviderWithIncludes.
-    // O cÃ¡lculo de nextAvailable Ã© assÃ­ncrono e deve ser feito no mÃ©todo chamador (ex: search, findOne)
-    // para evitar que mapProviderToCalculatedRating se torne assÃ­ncrona e quebre o fluxo.
-    const nextAvailable = undefined; // Inicializa como undefined. SerÃ¡ calculado nos mÃ©todos chamadores.
+    const rankingBoostScore = provider.rankingBoostScore ?? 0;
+    // CORRE??O TS2339: A propriedade 'nextAvailable' n?o existe em ProviderWithIncludes.
+    // O c?lculo de nextAvailable ? ass?ncrono e deve ser feito no m?todo chamador (ex: search, findOne).
+    const nextAvailable = undefined; // Ser? preenchido pelos m?todos chamadores.
 
     return {
       id: provider.id,
@@ -605,16 +600,14 @@ export class ProvidersService {
       },
     });
 
-    // Calcula nextAvailable de forma assÃ­ncrona para cada provedor
+    // Preenche campos ass?ncronos (nextAvailable, ranking) antes de retornar
     return Promise.all(
-      providers.map(async (p) => {
-        const mapped = this.mapProviderToCalculatedRating(
-          p as ProviderWithIncludes,
-        );
-        mapped.nextAvailable = await this.calculateNextAvailable(p.id);
-        return mapped;
-      }),
-    );
+  providers.map(async (p) => {
+    const mapped = this.mapProviderToCalculatedRating(p as ProviderWithIncludes);
+    // mapped.nextAvailable = undefined; // Já está assim, mantenha sem o hydrate!
+    return mapped;
+  }),
+);
   }
 
   async findOne(id: string): Promise<ProviderWithCalculatedRating | null> {
@@ -666,9 +659,7 @@ export class ProvidersService {
       provider = this.mapProviderToCalculatedRating(
         prismaProvider as ProviderWithIncludes,
       );
-      provider.nextAvailable = await this.calculateNextAvailable(
-        prismaProvider.id,
-      ); // Calcula nextAvailable
+      await this.hydrateProviderExtras(provider);
       await this.cacheService.set(
         cacheKey,
         provider,
@@ -720,6 +711,129 @@ export class ProvidersService {
     return this.prisma.review.count({
       where: { providerId, rating: 5 },
     });
+  }
+
+  private async calculateAcceptanceRate(providerId: string): Promise<number> {
+    const cacheKey = `${this.PROVIDERS_CACHE_KEY}:${providerId}:acceptanceRate`;
+    const cached = await this.cacheService.get<number>(cacheKey);
+    if (typeof cached === 'number') {
+      return cached;
+    }
+
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const requestStatuses = [
+      BookingStatus.PENDING,
+      BookingStatus.CONFIRMED,
+      BookingStatus.REJECTED,
+      BookingStatus.CANCELED,
+    ];
+
+    const [confirmedCount, totalCount] = await Promise.all([
+      this.prisma.booking.count({
+        where: {
+          providerId,
+          createdAt: { gte: since },
+          status: BookingStatus.CONFIRMED,
+        },
+      }),
+      this.prisma.booking.count({
+        where: {
+          providerId,
+          createdAt: { gte: since },
+          status: { in: requestStatuses },
+        },
+      }),
+    ]);
+
+    const rate =
+      totalCount > 0
+        ? Math.round((confirmedCount / totalCount) * 10000) / 100
+        : 0;
+
+    await this.cacheService.set(
+      cacheKey,
+      rate,
+      this.RANKING_METRICS_CACHE_TTL_SECONDS,
+    );
+
+    return rate;
+  }
+
+  private async countCompletedBookingsLast30Days(providerId: string): Promise<number> {
+    const cacheKey = `${this.PROVIDERS_CACHE_KEY}:${providerId}:completedBookingsLast30Days`;
+    const cached = await this.cacheService.get<number>(cacheKey);
+    if (typeof cached === 'number') {
+      return cached;
+    }
+
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const count = await this.prisma.booking.count({
+      where: {
+        providerId,
+        status: BookingStatus.FINISHED,
+        scheduledDate: { gte: since },
+      },
+    });
+
+    await this.cacheService.set(
+      cacheKey,
+      count,
+      this.RANKING_METRICS_CACHE_TTL_SECONDS,
+    );
+
+    return count;
+  }
+
+  private computeRankingBoostScore(
+    acceptanceRate: number,
+    completedBookingsLast30Days: number,
+  ): number {
+    const betaBonus = acceptanceRate > 90 ? 0.05 : 0;
+    const gammaBonus = Math.min(0.05, completedBookingsLast30Days / 250);
+    return Math.round((betaBonus + gammaBonus) * 100) / 100;
+  }
+
+ private async hydrateProviderExtras(
+    provider: ProviderWithCalculatedRating,
+    forceFull = false, // <--- ADICIONE ESTE PARÂMETRO COM DEFAULT FALSE
+  ): Promise<void> {
+    // SE NÃO FOR FORÇADO (BUSCA GERAL), SAIA DA FUNÇÃO PARA NÃO TRAVAR O SERVIDOR
+    if (!forceFull) {
+      provider.monthlyBookingsCount = 0;
+      provider.acceptanceRate = 0;
+      provider.nextAvailable = undefined;
+      provider.fiveStarReviewCount = 0;
+      provider.rankingBoostScore = 0;
+      return;
+    }
+
+    // O código pesado só roda se forceFull for true (ex: no perfil do profissional)
+    try {
+      const [
+        monthlyBookingsCount,
+        acceptanceRate,
+        completedBookingsLast30Days,
+        nextAvailable,
+        fiveStarReviewCount,
+      ] = await Promise.all([
+        this.resolveMonthlyBookingsCount(provider.id),
+        this.calculateAcceptanceRate(provider.id),
+        this.countCompletedBookingsLast30Days(provider.id),
+        this.calculateNextAvailable(provider.id),
+        this.resolveFiveStarReviewCount(provider.id),
+      ]);
+
+      provider.monthlyBookingsCount = monthlyBookingsCount;
+      provider.acceptanceRate = acceptanceRate;
+      provider.rankingBoostScore = this.computeRankingBoostScore(
+        acceptanceRate,
+        completedBookingsLast30Days,
+      );
+      provider.nextAvailable = nextAvailable;
+      provider.fiveStarReviewCount = fiveStarReviewCount;
+    } catch (error) {
+      this.logger.error(`Erro ao hidratar extras do provedor ${provider.id}: ${error.message}`);
+    }
   }
 
 
@@ -774,20 +888,10 @@ export class ProvidersService {
       return null;
     }
 
-    const providerWithCounts = prismaProvider as ProviderWithIncludes;
-    const [monthlyBookingsCount, fiveStarReviewCount] = await Promise.all([
-      this.resolveMonthlyBookingsCount(providerWithCounts.id),
-      this.resolveFiveStarReviewCount(providerWithCounts.id),
-    ]);
-    providerWithCounts.monthlyBookingsCount = monthlyBookingsCount;
-    providerWithCounts.fiveStarReviewCount = fiveStarReviewCount;
-
-    provider = this.mapProviderToCalculatedRating(providerWithCounts);
-    provider.monthlyBookingsCount = monthlyBookingsCount;
-    provider.fiveStarReviewCount = fiveStarReviewCount;
-    provider.nextAvailable = await this.calculateNextAvailable(
-      providerWithCounts.id,
-    ); // Calcula nextAvailable
+    provider = this.mapProviderToCalculatedRating(
+      prismaProvider as ProviderWithIncludes,
+    );
+    await this.hydrateProviderExtras(provider);
     await this.cacheService.set(
       cacheKey,
       provider,
@@ -916,9 +1020,7 @@ export class ProvidersService {
       const mapped = this.mapProviderToCalculatedRating(
         updatedProvider as ProviderWithIncludes,
       );
-      mapped.nextAvailable = await this.calculateNextAvailable(
-        updatedProvider.id,
-      ); // Calcula nextAvailable
+      await this.hydrateProviderExtras(mapped);
       return mapped;
     }
     return null;
@@ -1026,9 +1128,7 @@ export class ProvidersService {
     const mapped = this.mapProviderToCalculatedRating(
       updatedProvider as ProviderWithIncludes,
     );
-    mapped.nextAvailable = await this.calculateNextAvailable(
-      updatedProvider.id,
-    );
+    await this.hydrateProviderExtras(mapped);
     return mapped;
   }
 
@@ -1356,104 +1456,94 @@ export class ProvidersService {
         };
 
         const providerWithIncludes: ProviderWithIncludes = {
-          id: rp.id,
-          userId: rp.userId,
-          fullName: rp.fullName,
-          cpf: rp.cpf,
-          dateOfBirth: toDate(rp.dateOfBirth) ?? null,
-              phone: rp.phone || rp.user_phone || null,
-              yearsOfExperience: rp.yearsOfExperience,
-              avatarUrl: rp.avatarUrl,
-              bio: rp.bio,
-              verificationStatus: rp.verificationStatus, // NOVO
-              pixKey: rp.pixKey,
-              pixKeyMasked: rp.pixKeyMasked,
-              createdAt: toDate(rp.createdAt) ?? new Date(),
-              updatedAt: toDate(rp.updatedAt) ?? new Date(),
-              documentPhotoFrontUrl: rp.documentPhotoFrontUrl,
-              documentPhotoBackUrl: rp.documentPhotoBackUrl,
-              selfieWithDocumentUrl: rp.selfieWithDocumentUrl,
-              backgroundCheckResult: rp.backgroundCheckResult,
-              rejectionReason: rp.rejectionReason,
-              ocrResult: rp.ocrResult,
-              livenessResult: rp.livenessResult,
-              badges: rp.badges || [], // NOVO
-              fiveStarReviewCount: rp.fiveStarReviewCount,
-              monthlyBookingsCount: rp.monthlyBookingsCount,
-              acceptanceRate: rp.acceptanceRate || 0, // NOVO
-              averageResponseTime: rp.averageResponseTime || 0, // NOVO
-              user: {
-                email: rp.email,
-                role: rp.role,
-                isVerified: rp.isVerified,
-                fullName: rp.user_fullName,
-                phone: rp.user_phone,
-              },
-              address: rp.addressId
-                ? ({
-                    id: rp.addressId,
-                    cep: rp.cep,
-                    street: rp.street,
-                    number: rp.number,
-                    complement: rp.complement,
-                    neighborhood: rp.neighborhood,
-                    city: rp.city,
-                    state: rp.state,
-                    clientId: null,
-                    providerId: rp.providerId,
-                    latitude: rp.latitude_val || null,
-                    longitude: rp.longitude_val || null,
-                    location: null, // NÃ£o incluÃ­do na query raw
-                  } as Address)
-                : null,
-              providerServices: rp.providerServicesAgg
-                ? rp.providerServicesAgg.map((ps: any) => ({
-                    id: ps.id,
-                    providerId: ps.providerId,
-                    serviceId: ps.serviceId,
-                    price:
-                      ps.price != null ? new Decimal(ps.price) : new Decimal(0),
-                    durationMinutes: ps.durationMinutes,
-                    description: ps.description,
-                    createdAt: toDate(ps.createdAt) ?? new Date(),
-                    updatedAt: toDate(ps.updatedAt) ?? new Date(),
-                    pricingType: ps.pricingType,
-                    pricePerHour: ps.pricePerHour
-                      ? new Decimal(ps.pricePerHour)
-                      : new Decimal(0),
-                    pricePerSquareMeter: ps.pricePerSquareMeter
-                      ? new Decimal(ps.pricePerSquareMeter)
-                      : null,
-                    pricePerRoom: ps.pricePerRoom
-                      ? new Decimal(ps.pricePerRoom)
-                      : null,
-                    service: {
-                      id: ps.service.id,
-                      name: ps.service.name,
-                      description: ps.service.description,
-                      icon: ps.service.icon,
-                      price:
-                        ps.service.price != null
-                          ? new Decimal(ps.service.price)
-                          : new Decimal(0),
-                      createdAt: toDate(ps.service.createdAt) ?? new Date(),
-                      updatedAt: toDate(ps.service.updatedAt) ?? new Date(),
-                    },
-                  }))
-                : [],
-              reviewsReceived: [], // NÃ£o incluÃ­do na query raw; calcular averageRating separadamente se necessÃ¡rio
-              bookings: [], // NÃ£o incluÃ­do na query raw
-              availability: [], // Fetch separado para nextAvailable
-            };
+  id: rp.id,
+  userId: rp.userId,
+  fullName: rp.fullName,
+  cpf: rp.cpf,
+  dateOfBirth: toDate(rp.dateOfBirth) ?? null,
+  phone: rp.phone || rp.user_phone || null,
+  yearsOfExperience: rp.yearsOfExperience,
+  avatarUrl: rp.avatarUrl,
+  bio: rp.bio,
+  verificationStatus: rp.verificationStatus,
+  pixKey: rp.pixKey,
+  pixKeyMasked: rp.pixKeyMasked,
+  createdAt: toDate(rp.createdAt) ?? new Date(),
+  updatedAt: toDate(rp.updatedAt) ?? new Date(),
+  documentPhotoFrontUrl: rp.documentPhotoFrontUrl,
+  documentPhotoBackUrl: rp.documentPhotoBackUrl,
+  selfieWithDocumentUrl: rp.selfieWithDocumentUrl,
+  backgroundCheckResult: rp.backgroundCheckResult,
+  rejectionReason: rp.rejectionReason,
+  ocrResult: rp.ocrResult,
+  livenessResult: rp.livenessResult,
+  badges: rp.badges || [],
+  fiveStarReviewCount: rp.fiveStarReviewCount,
+  monthlyBookingsCount: rp.monthlyBookingsCount,
+  acceptanceRate: rp.acceptanceRate || 0,
+  averageResponseTime: rp.averageResponseTime || 0,
+  user: {
+    email: rp.email,
+    role: rp.role,
+    isVerified: rp.isVerified,
+    fullName: rp.user_fullName,
+    phone: rp.user_phone,
+  },
+  address: rp.addressId
+    ? ({
+        id: rp.addressId,
+        cep: rp.cep,
+        street: rp.street,
+        number: rp.number,
+        complement: rp.complement,
+        neighborhood: rp.neighborhood,
+        city: rp.city,
+        state: rp.state,
+        clientId: null,
+        providerId: rp.providerId,
+        latitude: rp.latitude_val || null,
+        longitude: rp.longitude_val || null,
+        location: null,
+      } as Address)
+    : null,
+  providerServices: rp.providerServicesAgg
+    ? rp.providerServicesAgg.map((ps: any) => ({
+        id: ps.id,
+        providerId: ps.providerId,
+        serviceId: ps.serviceId,
+        price: ps.price != null ? new Decimal(ps.price) : new Decimal(0),
+        durationMinutes: ps.durationMinutes,
+        description: ps.description,
+        createdAt: toDate(ps.createdAt) ?? new Date(),
+        updatedAt: toDate(ps.updatedAt) ?? new Date(),
+        pricingType: ps.pricingType,
+        pricePerHour: ps.pricePerHour ? new Decimal(ps.pricePerHour) : new Decimal(0),
+        pricePerSquareMeter: ps.pricePerSquareMeter ? new Decimal(ps.pricePerSquareMeter) : null,
+        pricePerRoom: ps.pricePerRoom ? new Decimal(ps.pricePerRoom) : null,
+        service: {
+          id: ps.service.id,
+          name: ps.service.name,
+          description: ps.service.description,
+          icon: ps.service.icon,
+          price: ps.service.price != null ? new Decimal(ps.service.price) : new Decimal(0),
+          createdAt: toDate(ps.service.createdAt) ?? new Date(),
+          updatedAt: toDate(ps.service.updatedAt) ?? new Date(),
+        },
+      }))
+    : [],
+  reviewsReceived: [],
+  bookings: [], // Mantenha vazio aqui para não estourar a RAM
+  // REMOVA A LINHA 'availability: []' DAQUI SE DER ERRO
+};
+
+// Se o TS continuar reclamando, você deve ir no topo do arquivo e 
+// garantir que 'availability' está no 'ProviderWithIncludes'.
 
             const mappedProvider = this.mapProviderToCalculatedRating(
               providerWithIncludes,
               parseFloat(rp.distance_m),
-            ); // CORREÃÃO: Usa distance_m (em metros)
-            // O cÃ¡lculo de nextAvailable Ã© feito aqui, pois mapProviderToCalculatedRating Ã© sÃ­ncrona
-            mappedProvider.nextAvailable = await this.calculateNextAvailable(
-              rp.id,
-            );
+            ); // CORRE??O: Usa distance_m (em metros)
+            await this.hydrateProviderExtras(mappedProvider);
             return mappedProvider;
           }),
         );
@@ -1575,8 +1665,7 @@ export class ProvidersService {
             provider as ProviderWithIncludes,
             distance,
           );
-          // O cÃ¡lculo de nextAvailable Ã© feito aqui, pois mapProviderToCalculatedRating Ã© sÃ­ncrona
-          mapped.nextAvailable = await this.calculateNextAvailable(provider.id);
+          await this.hydrateProviderExtras(mapped);
           return mapped;
         }),
       );
@@ -1966,8 +2055,7 @@ export class ProvidersService {
             provider as ProviderWithIncludes,
             distance,
           );
-          // O cÃ¡lculo de nextAvailable Ã© feito aqui, pois mapProviderToCalculatedRating Ã© sÃ­ncrona
-          mapped.nextAvailable = await this.calculateNextAvailable(provider.id);
+          await this.hydrateProviderExtras(mapped);
           return mapped;
         }),
       );
