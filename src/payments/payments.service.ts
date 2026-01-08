@@ -1376,10 +1376,13 @@ export class PaymentsService {
     if (!booking.scheduledDate || !booking.scheduledTime) {
       return undefined;
     }
-    const scheduledDate =
+    const rawScheduledDate =
       booking.scheduledDate instanceof Date
-        ? booking.scheduledDate.toISOString().split('T')[0]
-        : booking.scheduledDate.split('T')[0];
+        ? booking.scheduledDate.toISOString()
+        : String(booking.scheduledDate);
+    const scheduledDate = rawScheduledDate.includes('T')
+      ? rawScheduledDate.split('T')[0]
+      : rawScheduledDate;
     const timeSegment = formatScheduledTime(booking.scheduledTime);
     const normalizedTime =
       timeSegment.split(':').length === 2 ? `${timeSegment}:00` : timeSegment;
