@@ -1,10 +1,30 @@
+// src/bookings/booking-time.utils.ts
+
+/**
+ * Calcula a data/hora exata em São Paulo considerando fuso horário e horário de verão.
+ * Aceita scheduledTime como string (HH:mm) ou Date.
+ */
 export function calculateScheduledAtInSaoPaulo(
   dateValue: string | number | Date,
-  timeHHmm?: string | null,
+  timeHHmm?: string | Date | null, // Tipagem atualizada para aceitar Date
 ): Date {
   const d = new Date(dateValue);
+  let finalTimeStr = '00:00';
 
-  const [hhRaw, mmRaw] = String(timeHHmm || '00:00')
+  // Lógica para normalizar o tempo para o formato HH:mm
+  if (timeHHmm instanceof Date) {
+    // Extrai HH:mm do objeto Date (ISO string: 2023-10-27T14:30:00Z -> 14:30)
+    finalTimeStr = timeHHmm.toISOString().split('T')[1].substring(0, 5);
+  } else if (typeof timeHHmm === 'string') {
+    // Se for uma string completa (ISO), extrai a parte do tempo
+    if (timeHHmm.includes('T')) {
+      finalTimeStr = timeHHmm.split('T')[1].substring(0, 5);
+    } else {
+      finalTimeStr = timeHHmm;
+    }
+  }
+
+  const [hhRaw, mmRaw] = finalTimeStr
     .split(':')
     .map((n) => parseInt(n, 10));
 
@@ -19,6 +39,7 @@ export function calculateScheduledAtInSaoPaulo(
   const t = Date.UTC(y, m, day, hh, mm, 0, 0);
   let guess = new Date(t);
 
+  // Ajuste iterativo de fuso horário
   for (let i = 0; i < 2; i++) {
     const off = tzOffsetMinutes(guess, tz);
     const corrected = Date.UTC(y, m, day, hh, mm, 0, 0) - off * 60000;
@@ -58,7 +79,7 @@ function tzOffsetMinutes(date: Date, timeZone: string): number {
 
 export interface BookingScheduleInfo {
   scheduledDate: Date | string;
-  scheduledTime?: string | Date | null; // Adicione Date aqui
+  scheduledTime?: string | Date | null;
   scheduledStart?: Date | string | null;
   startedAt?: Date | string | null;
   durationMinutes?: number | null;
@@ -74,7 +95,7 @@ export function calculateExpectedEnd(info: BookingScheduleInfo): Date {
           ? info.scheduledStart
           : typeof info.scheduledStart === 'string'
             ? new Date(info.scheduledStart)
-    : calculateScheduledAtInSaoPaulo(info.scheduledDate, info.scheduledTime);
+            : calculateScheduledAtInSaoPaulo(info.scheduledDate, info.scheduledTime);
 
   const durationMinutes = Number.isFinite(info.durationMinutes ?? NaN)
     ? info.durationMinutes!
@@ -86,6 +107,7 @@ export function calculateExpectedEnd(info: BookingScheduleInfo): Date {
 export function formatScheduledTime(value?: string | Date | null): string {
   if (!value) return '00:00';
   if (value instanceof Date) {
+    // Retorna HH:mm
     return value.toISOString().slice(11, 16);
   }
   if (typeof value === 'string') {
