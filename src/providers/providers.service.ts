@@ -596,7 +596,7 @@ export class ProvidersService {
           orderBy: { createdAt: 'desc' },
           take: 100,
         },
-        availability: true, // NOVO: Para nextAvailable
+       // availability: true, // NOVO: Para nextAvailable
       },
     });
 
@@ -625,7 +625,7 @@ export class ProvidersService {
       return provider;
     }
 
-    const prismaProvider = await this.prisma.provider.findUnique({
+ const prismaProvider = await this.prisma.provider.findUnique({
       where: { id },
       include: {
         user: {
@@ -651,9 +651,33 @@ export class ProvidersService {
           orderBy: { createdAt: 'desc' },
           take: 100,
         },
-        availability: true, // NOVO: Para nextAvailable
+        // availability: true, // 👈 COMENTE OU REMOVA ESTA LINHA PARA PARAR O ERRO P2032
       },
     });
+
+    if (prismaProvider) {
+      // Como removemos o include acima, forçamos o tipo sem availability para não dar erro de tipagem
+      provider = this.mapProviderToCalculatedRating(
+        prismaProvider as any, 
+      );
+
+      await this.hydrateProviderExtras(provider);
+
+      // Opcional: Se o 'nextAvailable' for crucial, você busca ele via service aqui:
+      // const availability = await this.availabilityService.getAvailability(id, { date: new Date().toISOString() });
+      // provider.availability = availability.available;
+
+      await this.cacheService.set(
+        cacheKey,
+        provider,
+        this.PUBLIC_PROVIDERS_CACHE_TTL_SECONDS,
+      );
+      
+      this.logger.log(
+        `[ProvidersService] findOne: Provedor ${id} adicionado ao cache.`,
+      );
+      return provider;
+    }
 
     if (prismaProvider) {
       provider = this.mapProviderToCalculatedRating(
@@ -880,7 +904,7 @@ export class ProvidersService {
           orderBy: { createdAt: 'desc' },
           take: 100,
         },
-        availability: true, // NOVO: Para nextAvailable
+        //availability: true, // NOVO: Para nextAvailable
       },
     });
 
@@ -985,7 +1009,7 @@ export class ProvidersService {
           orderBy: { createdAt: 'desc' },
           take: 100,
         },
-        availability: true, // NOVO: Para nextAvailable
+        // availability: true, // NOVO: Para nextAvailable
       },
     });
 
@@ -1102,7 +1126,7 @@ export class ProvidersService {
           orderBy: { createdAt: 'desc' },
           take: 100,
         },
-        availability: true,
+        // availability: true, //
       },
     });
 
@@ -1787,7 +1811,7 @@ const providerWithIncludes = {
               orderBy: { createdAt: 'desc' },
               take: 100,
             },
-            availability: true,
+            //availability: true,
           },
           orderBy: { yearsOfExperience: 'desc' },
           take: 50,
@@ -1825,7 +1849,7 @@ const providerWithIncludes = {
             orderBy: { createdAt: 'desc' },
             take: 100,
           },
-          availability: true, // NOVO: Para nextAvailable
+         // availability: true, // NOVO: Para nextAvailable
         },
         orderBy: {
           yearsOfExperience: 'desc',
