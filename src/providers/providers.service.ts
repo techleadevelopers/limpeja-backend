@@ -1,6 +1,8 @@
 // src/providers/providers.service.ts
 import {
   BadRequestException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -27,7 +29,8 @@ import { UpdateProviderProfileDto } from './dto/update-provider-profile.dto';
 import { Decimal } from '@prisma/client/runtime/library';
 import { geocodeAddress } from '../utils/geocoding.service';
 import { SettingsService } from '../settings/settings.service';
-import { formatScheduledTime } from '../bookings/booking-time.utils';
+import { AvailabilityService } from '../availability/availability.service';
+import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
 
 // Type principal para provedores com todas as inclus√µes necess√°rias para mapeamento
 export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
@@ -175,6 +178,8 @@ export class ProvidersService {
     private readonly documentProcessingService: DocumentProcessingService,
     private readonly cacheService: CacheService,
     private readonly settingsService: SettingsService,
+    @Inject(forwardRef(() => AvailabilityService))
+    private readonly availabilityService: AvailabilityService,
   ) {}
 
   private buildAddressString(address?: Partial<Address>): string | null {
@@ -349,55 +354,38 @@ export class ProvidersService {
     `;
   }
 
-  // NOVO: Helper para calcular nextAvailable (primeiro slot futuro, alinhado com relat√≥rio)
+  // NOVO: Helper para calcular nextAvailable (primeiro slot futuro, alinhado com relat«¸rio)
   private async calculateNextAvailable(
     providerId: string,
   ): Promise<{ date: string; time: string } | undefined> {
     const today = new Date();
-    const daysAhead = 3; // Limitado a D+2 conforme relat√≥rio
-    let nextSlot: { date: string; time: string } | undefined;
+    const daysAhead = 3; // Limitado a D+2 conforme relat«¸rio
 
     for (let dayOffset = 0; dayOffset < daysAhead; dayOffset++) {
-      const targetDate = new Date(today);
-      targetDate.setDate(today.getDate() + dayOffset);
-      const dayOfWeek = targetDate.getDay();
+      const targetDate = new Date(today.getTime());
+      targetDate.setUTCDate(targetDate.getUTCDate() + dayOffset);
       const dateStr = targetDate.toISOString().split('T')[0];
 
-      // Buscar disponibilidade configurada para o dia
-      const availability = await this.prisma.availability.findMany({
-        where: { providerId, dayOfWeek, isAvailable: true },
-        orderBy: { startTime: 'asc' },
-      });
+      const availabilityQuery: GetAvailabilityDto = { date: dateStr };
+      const { available, occupiedTimes } =
+        await this.availabilityService.getAvailability(
+          providerId,
+          availabilityQuery,
+        );
+      const activeSlots = available.filter((slot) => slot.isAvailable);
+      if (!activeSlots.length) {
+        continue;
+      }
 
-      if (availability.length > 0) {
-        // Buscar ocupa√ß√µes no dia (bookings confirmados/in progress)
-        const occupiedTimes = await this.prisma.booking.findMany({
-          where: {
-            providerId,
-            scheduledDate: {
-              gte: new Date(dateStr + 'T00:00:00Z'),
-              lte: new Date(dateStr + 'T23:59:59Z'),
-            },
-            status: { in: [BookingStatus.CONFIRMED, BookingStatus.STARTED] },
-          },
-          select: { scheduledTime: true, scheduledEnd: true }, // ‚úÖ aqui
-        });
-
-        // Encontrar primeiro slot livre
-        for (const slot of availability) {
-          const isOccupied = occupiedTimes.some(
-            (b) => formatScheduledTime(b.scheduledTime) === slot.startTime,
-          );
-          if (!isOccupied) {
-            nextSlot = { date: dateStr, time: slot.startTime };
-            break;
-          }
+      const occupiedSet = new Set(occupiedTimes);
+      for (const slot of activeSlots) {
+        if (!occupiedSet.has(slot.startTime)) {
+          return { date: dateStr, time: slot.startTime };
         }
-        if (nextSlot) break;
       }
     }
 
-    return nextSlot;
+    return undefined;
   }
 
   public mapProviderToCalculatedRating(
