@@ -612,10 +612,10 @@ export class ProvidersService {
     );
   }
 
-  async findOne(id: string): Promise<ProviderWithCalculatedRating | null> {
-    this.logger.log(
-      `[ProvidersService] findOne: Buscando provedor por ID: ${id}`,
-    );
+  async findOne(id: string, forceFull = false): Promise<ProviderWithCalculatedRating | null> {
+  this.logger.log(
+    `[ProvidersService] findOne: Buscando provedor por ID: ${id} (forceFull: ${forceFull})`,
+  );
     const cacheKey = `${this.PROVIDERS_CACHE_KEY}:${id}`;
     let provider =
       await this.cacheService.get<ProviderWithCalculatedRating>(cacheKey);
@@ -661,7 +661,7 @@ export class ProvidersService {
       provider = this.mapProviderToCalculatedRating(
         prismaProvider as ProviderWithIncludes,
       );
-      await this.hydrateProviderExtras(provider);
+      await this.hydrateProviderExtras(provider, forceFull);
       await this.cacheService.set(
         cacheKey,
         provider,
