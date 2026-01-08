@@ -435,34 +435,38 @@ export class ProvidersService {
       verificationStatus: provider.verificationStatus, // NOVO: IncluÃ­do para selo
       address: provider.address ?? null,
       providerServices: provider.providerServices.map((ps) => ({
-        id: ps.id,
-        providerId: ps.providerId,
-        serviceId: ps.serviceId,
-        price: ps.price ? ps.price.toNumber() : 0,
-        durationMinutes: ps.durationMinutes,
-        description: ps.description,
-        service: {
-          id: ps.service.id,
-          name: ps.service.name,
-          description: ps.service.description,
-          icon: ps.service.icon,
-          price: ps.service.price ? ps.service.price.toNumber() : 0,
-          createdAt:
-            ps.service.createdAt instanceof Date
-              ? ps.service.createdAt.toISOString()
-              : ps.service.createdAt,
-          updatedAt:
-            ps.service.updatedAt instanceof Date
-              ? ps.service.updatedAt.toISOString()
-              : ps.service.updatedAt,
-        },
-        createdAt: ps.createdAt.toISOString(),
-        updatedAt: ps.updatedAt.toISOString(),
-        pricingType: ps.pricingType,
-        pricePerHour: ps.pricePerHour ? ps.pricePerHour.toNumber() : 0,
-        pricePerSquareMeter: ps.pricePerSquareMeter?.toNumber() || null,
-        pricePerRoom: ps.pricePerRoom?.toNumber() || null,
-      })) as ProviderServiceForFrontend[],
+  id: ps.id,
+  providerId: ps.providerId,
+  serviceId: ps.serviceId,
+  price: ps.price ? ps.price.toNumber() : 0,
+  durationMinutes: ps.durationMinutes,
+  description: ps.description,
+  service: {
+    id: ps.service.id,
+    name: ps.service.name,
+    description: ps.service.description,
+    icon: ps.service.icon,
+    price: ps.service.price ? ps.service.price.toNumber() : 0,
+    // Proteção para o service
+    createdAt: ps.service.createdAt instanceof Date 
+      ? ps.service.createdAt.toISOString() 
+      : new Date(ps.service.createdAt).toISOString(),
+    updatedAt: ps.service.updatedAt instanceof Date 
+      ? ps.service.updatedAt.toISOString() 
+      : new Date(ps.service.updatedAt).toISOString(),
+  },
+  // Proteção para o providerService (A correção principal)
+  createdAt: ps.createdAt instanceof Date 
+    ? ps.createdAt.toISOString() 
+    : new Date(ps.createdAt as any).toISOString(),
+  updatedAt: ps.updatedAt instanceof Date 
+    ? ps.updatedAt.toISOString() 
+    : new Date(ps.updatedAt as any).toISOString(),
+  pricingType: ps.pricingType,
+  pricePerHour: ps.pricePerHour ? ps.pricePerHour.toNumber() : 0,
+  pricePerSquareMeter: ps.pricePerSquareMeter?.toNumber() || null,
+  pricePerRoom: ps.pricePerRoom?.toNumber() || null,
+})) as ProviderServiceForFrontend[],
       averageRating: averageRating,
       reviewCount: provider.reviewsReceived?.length || 0,
       yearsOfExperience: provider.yearsOfExperience || 0,
