@@ -61,6 +61,24 @@ const CONFLICT_BOOKING_STATUSES = [
   BookingStatus.FINISHED,
 ];
 
+const TIME_ONLY_REGEX = /^\d{2}:\d{2}$/;
+
+const normalizeSlotTime = (value?: string | null): string | null => {
+  if (!value) return null;
+  const [candidate] = value.split('-');
+  const trimmed = candidate?.trim();
+  if (!trimmed) return null;
+  const formatted = formatScheduledTime(trimmed);
+  return TIME_ONLY_REGEX.test(formatted) ? formatted : null;
+};
+
+interface SanitizedConfiguredSlot {
+  [key: string]: any;
+  startTime: string;
+  endTime: string;
+  isAvailable: boolean;
+}
+
 @Injectable()
 export class AvailabilityService {
   constructor(private prisma: PrismaService) {}
@@ -91,14 +109,17 @@ export class AvailabilityService {
       );
     }
 
+    const requestedDateKey = date.split('T')[0];
     const {
       start: rangeStart,
       end: rangeEnd,
       dayOfWeek: rawDayOfWeek,
-    } = getSaoPauloDayRangeFromDateString(date);
+    } = getSaoPauloDayRangeFromDateString(requestedDateKey);
     const actualDayOfWeek = Number(rawDayOfWeek);
     console.log(
-      'Buscando disponibilidade para o dia da semana:',
+      '[AvailabilityService] buscando disponibilidade',
+      requestedDateKey,
+      'dia da semana:',
       actualDayOfWeek,
       'Tipo:',
       typeof actualDayOfWeek,
@@ -120,10 +141,27 @@ export class AvailabilityService {
       AND "isAvailable" = true
       ORDER BY "startTime" ASC
     `;
+    const sanitizedAvailability = configuredAvailability
+      .map((slot): SanitizedConfiguredSlot | null => {
+        const startTime = normalizeSlotTime(slot.startTime);
+        const endTime = normalizeSlotTime(slot.endTime);
+        if (!startTime || !endTime) {
+          console.warn('[AvailabilityService] ignorando slot com horA!rio invA!lido', slot);
+          return null;
+        }
+        return {
+          ...slot,
+          startTime,
+          endTime,
+          isAvailable: Boolean(slot.isAvailable),
+        };
+      })
+      .filter((slot): slot is SanitizedConfiguredSlot => Boolean(slot));
+
     console.log(
-      '[AvailabilityService] configuredAvailability',
-      actualDayOfWeek,
-      configuredAvailability.map((slot) => `${slot.startTime}-${slot.endTime} (${slot.isAvailable})`),
+      '[AvailabilityService] normalizedAvailability',
+      requestedDateKey,
+      sanitizedAvailability.map((slot) => `${slot.startTime}-${slot.endTime} (${slot.isAvailable})`),
     );
 
     // 2. Buscar agendamentos ocupados na data real (2026...)
@@ -148,9 +186,10 @@ export class AvailabilityService {
     });
 
     // Retornamos o objeto que o calendário e o ProvidersService esperam
-    return { 
-      available: configuredAvailability, 
-      occupiedTimes 
+    return {
+      requestedDate: requestedDateKey,
+      available: sanitizedAvailability,
+      occupiedTimes,
     };
   }
 
