@@ -15,8 +15,10 @@ import {
 } from './timezone';
 import { Availability, BookingStatus } from '@prisma/client';
 import {
+  formatScheduledTime,
   scheduledTimeToMinutes,
 } from '../bookings/booking-time.utils';
+import { BLOCKED_BOOKING_STATUSES } from '../bookings/bookings.constants';
 
 // Garante que os horários configurados sejam sempre "cheios" (ex.: 09:00, 10:00)
 const assertFullHour = (label: string, time: string) => {
@@ -130,13 +132,7 @@ export class AvailabilityService {
           lte: rangeEnd,
         },
         status: {
-          in: [
-            BookingStatus.CONFIRMED,
-            BookingStatus.FINISHED,
-            BookingStatus.STARTED,
-            BookingStatus.PENDING,
-            BookingStatus.PENDING_PAYMENT,
-          ],
+          in: BLOCKED_BOOKING_STATUSES,
         },
       },
       select: {
@@ -145,11 +141,11 @@ export class AvailabilityService {
     });
 
     // --- CORREÇÃO TS2322: Garantindo conversão de Date para string ---
-    const occupiedTimes: string[] = bookingsOnDate.map((b) => {
-      return b.scheduledTime instanceof Date
-        ? b.scheduledTime.toISOString()
-        : String(b.scheduledTime);
-    });
+    // Substitua o map atual por este:
+const occupiedTimes: string[] = bookingsOnDate.map((b) => {
+  // Use a utilitária que já importa o formatScheduledTime
+  return formatScheduledTime(b.scheduledTime); 
+});
 
     console.log(
       '[AvailabilityService] Horários ocupados por agendamentos:',
