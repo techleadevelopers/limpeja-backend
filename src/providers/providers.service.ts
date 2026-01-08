@@ -795,48 +795,26 @@ export class ProvidersService {
     return Math.round((betaBonus + gammaBonus) * 100) / 100;
   }
 
- private async hydrateProviderExtras(
-    provider: ProviderWithCalculatedRating,
-    forceFull = false, // <--- ADICIONE ESTE PARÂMETRO COM DEFAULT FALSE
-  ): Promise<void> {
-    // SE NÃO FOR FORÇADO (BUSCA GERAL), SAIA DA FUNÇÃO PARA NÃO TRAVAR O SERVIDOR
-    if (!forceFull) {
-      provider.monthlyBookingsCount = 0;
-      provider.acceptanceRate = 0;
-      provider.nextAvailable = undefined;
-      provider.fiveStarReviewCount = 0;
-      provider.rankingBoostScore = 0;
-      return;
-    }
+// Localize sua função hydrateProviderExtras e deixe ela assim:
+private async hydrateProviderExtras(
+  provider: ProviderWithCalculatedRating,
+  forceFull = false, 
+) {
+  // Se for busca rápida (lista de cards), não fazemos nada pesado
+  if (!forceFull) return;
 
-    // O código pesado só roda se forceFull for true (ex: no perfil do profissional)
-    try {
-      const [
-        monthlyBookingsCount,
-        acceptanceRate,
-        completedBookingsLast30Days,
-        nextAvailable,
-        fiveStarReviewCount,
-      ] = await Promise.all([
-        this.resolveMonthlyBookingsCount(provider.id),
-        this.calculateAcceptanceRate(provider.id),
-        this.countCompletedBookingsLast30Days(provider.id),
-        this.calculateNextAvailable(provider.id),
-        this.resolveFiveStarReviewCount(provider.id),
-      ]);
-
-      provider.monthlyBookingsCount = monthlyBookingsCount;
-      provider.acceptanceRate = acceptanceRate;
-      provider.rankingBoostScore = this.computeRankingBoostScore(
-        acceptanceRate,
-        completedBookingsLast30Days,
-      );
-      provider.nextAvailable = nextAvailable;
-      provider.fiveStarReviewCount = fiveStarReviewCount;
-    } catch (error) {
-      this.logger.error(`Erro ao hidratar extras do provedor ${provider.id}: ${error.message}`);
-    }
+  // Se o usuário entrou no perfil (findOne com forceFull=true)
+  // chamamos o cálculo de slots via AvailabilityService, que é SEGURO.
+  try {
+    const nextAvailable = await this.calculateNextAvailable(provider.id);
+    provider.nextAvailable = nextAvailable; // Aqui o slot aparece no front!
+    
+    // Outras métricas...
+    provider.monthlyBookingsCount = await this.resolveMonthlyBookingsCount(provider.id);
+  } catch (e) {
+    this.logger.error("Erro ao carregar slots: " + e.message);
   }
+}
 
 
   async findByUserId(
