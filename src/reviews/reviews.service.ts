@@ -121,13 +121,29 @@ export class ReviewsService {
     private missionsService: MissionsService,
   ) {}
 
-  private buildScheduledStart(booking: BookingWithRelationsForReview): Date {
+private buildScheduledStart(booking: BookingWithRelationsForReview): Date {
     const baseDate = new Date(booking.scheduledDate);
-    const [hourStr = '0', minuteStr = '0'] = (booking.scheduledTime ?? '00:00')
-      .split(':')
-      .map((value) => value.trim());
-    const hour = Number.parseInt(hourStr, 10) || 0;
-    const minute = Number.parseInt(minuteStr, 10) || 0;
+    
+    // 1. Pegamos o valor e forçamos o TS a tratá-lo como 'any' temporariamente 
+    // para evitar a inferência de 'never'.
+    const rawTime: any = booking.scheduledTime;
+    let timeStr = '00:00';
+
+    if (rawTime instanceof Date) {
+      // Se for objeto Date (vinda do Prisma)
+      timeStr = rawTime.toISOString().split('T')[1].substring(0, 5);
+    } else if (typeof rawTime === 'string') {
+      // Se for string (ISO completa ou HH:mm)
+      timeStr = rawTime.includes('T') 
+        ? rawTime.split('T')[1].substring(0, 5) 
+        : rawTime;
+    }
+
+    // 2. Agora fazemos o split em uma variável que o TS tem certeza que é string
+    const parts = (timeStr || '00:00').split(':');
+    const hour = parseInt(parts[0] || '0', 10) || 0;
+    const minute = parseInt(parts[1] || '0', 10) || 0;
+
     baseDate.setHours(hour, minute, 0, 0);
     return baseDate;
   }
