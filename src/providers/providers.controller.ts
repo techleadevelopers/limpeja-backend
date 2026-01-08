@@ -659,17 +659,13 @@ export class ProvidersController {
   // ROTAS COM PARÂMETROS DINÂMICOS (Devem vir por último)
   // =================================================================================================
 
-  // =================================================================================================
-  // ROTAS COM PARÂMETROS DINÂMICOS (Devem vir por último)
-  // =================================================================================================
-
   @Get(':id')
   @ApiOperation({ summary: 'Obter detalhes de um provedor por ID' })
   @ApiQuery({
-    name: 'forceFull',
+    name: 'includeReviews',
     required: false,
     type: Boolean,
-    description: 'Se true, força o cálculo de disponibilidade e métricas pesadas',
+    description: 'Incluir avaliações do provedor',
   })
   @ApiResponse({
     status: 200,
@@ -677,31 +673,21 @@ export class ProvidersController {
     type: ProviderDetailsDto,
   })
   @ApiResponse({ status: 404, description: 'Provedor não encontrado.' })
-  async findOne(
-    @Param('id') id: string,
-    @Query('forceFull') forceFull?: string, // <--- ADICIONADO ISSO
-  ): Promise<ProviderDetailsDto> {
+  async findOne(@Param('id') id: string): Promise<ProviderDetailsDto> {
     this.logger.log(
-      `[ProvidersController] findOne: Buscando provedor por ID: ${id} (forceFull: ${forceFull})`,
+      `[ProvidersController] findOne: Buscando provedor por ID: ${id}`,
     );
-
-    // Converte a string 'true' da URL para boolean
-    const isFull = forceFull === 'true';
-
-    // PASSA O isFull PARA O SERVICE AQUI EMBAIXO
-    const provider = await this.providersService.findOne(id, isFull); 
-
+    const provider = await this.providersService.findOne(id);
     if (!provider) {
       this.logger.warn(
         `[ProvidersController] findOne: Provedor com ID "${id}" não encontrado.`,
       );
       throw new NotFoundException(`Provedor com ID "${id}" não encontrado.`);
     }
-
     this.logger.log(
       `[ProvidersController] findOne: Provedor ${id} encontrado.`,
     );
-    
+    // NOVO: Inclui novos campos opcionais (ex.: nextAvailable, badges)
     return new ProviderDetailsDto(provider);
   }
 
