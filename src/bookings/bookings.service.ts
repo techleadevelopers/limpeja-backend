@@ -296,7 +296,7 @@ export class BookingsService {
    * Converte (YYYY-MM-DD + HH:mm) como horário local do timeZone
    * para um Date correto (instante real), independente do TZ do servidor.
    */
-  private getScheduledAtInSaoPaulo(
+private getScheduledAtInSaoPaulo(
     dateValue: string | number | Date,
     timeHHmm: string | null | undefined,
   ): Date {
@@ -328,6 +328,14 @@ export class BookingsService {
     }
 
     return guess;
+  }
+
+   // Novo: normaliza scheduledTime que pode vir como Date ou string para HH:mm (ou null)
+  private normalizeScheduledTimeForHelper(
+    time: string | Date | null | undefined,
+  ): string | null {
+    if (!time) return null;
+    return typeof time === 'string' ? time : formatScheduledTime(time as Date);
   }
 
   private formatDateToYyyyMmDd(date: Date): string {
@@ -1833,7 +1841,7 @@ export class BookingsService {
       },
     });
     const bookingsWithDetails =
-      bookings as BookingWithDetailsRelations[];
+      bookings as unknown as BookingWithDetailsRelations[];
     return bookingsWithDetails.map((booking) =>
       this.withAllowedActions(booking, role, userId),
     );
@@ -1932,7 +1940,7 @@ export class BookingsService {
     if (userRole === UserRole.PROVIDER && booking.status === BookingStatus.ARRIVED && newStatus === BookingStatus.STARTED) {
       const scheduledAt = this.getScheduledAtInSaoPaulo(
         booking.scheduledDate,
-        booking.scheduledTime, // O helper getScheduledAtInSaoPaulo deve aceitar Date | string
+        this.normalizeScheduledTimeForHelper(booking.scheduledTime),
       );
       const diffMin = Math.round((now.getTime() - scheduledAt.getTime()) / 60000);
       
@@ -1945,7 +1953,7 @@ export class BookingsService {
 
     // CORREÇÃO TIME: Finalização (STARTED -> FINISHED)
     if (userRole === UserRole.PROVIDER && booking.status === BookingStatus.STARTED && newStatus === BookingStatus.FINISHED) {
-      const refStart = booking.startedAt ?? booking.scheduledStart ?? this.getScheduledAtInSaoPaulo(booking.scheduledDate, booking.scheduledTime);
+      const refStart = booking.startedAt ?? booking.scheduledStart ?? this.getScheduledAtInSaoPaulo(booking.scheduledDate, this.normalizeScheduledTimeForHelper(booking.scheduledTime));
       
       const runMin = Math.round((now.getTime() - new Date(refStart as any).getTime()) / 60000);
       const minRunMinutes = parseInt(process.env.MIN_SERVICE_MINUTES ?? '15', 10);
@@ -1978,13 +1986,12 @@ export class BookingsService {
     // CORREÇÃO TS2345: Agendamento de Lembretes (CONFIRMED)
     if (newStatus === BookingStatus.CONFIRMED) {
       try {
-        const scheduledAt = this.getScheduledAtInSaoPaulo(updatedBooking.scheduledDate, updatedBooking.scheduledTime);
+        const scheduledAt = this.getScheduledAtInSaoPaulo(
+          updatedBooking.scheduledDate,
+          this.normalizeScheduledTimeForHelper(updatedBooking.scheduledTime),
+        );
         
-        // CORREÇÃO: Usando a função utilitária para tratar o Date | string antes do split
-        const timeString = typeof updatedBooking.scheduledTime === 'string' 
-          ? updatedBooking.scheduledTime 
-          : updatedBooking.scheduledTime.toISOString().split('T')[1].substring(0, 5);
-
+        const timeString = this.normalizeScheduledTimeForHelper(updatedBooking.scheduledTime) || '00:00';
         const [hh, mm] = timeString.split(':').map(n => parseInt(n, 10));
 
         await this.schedulerService.scheduleBookingReminders({
@@ -2070,7 +2077,7 @@ export class BookingsService {
         booking.scheduledStart ??
         this.getScheduledAtInSaoPaulo(
           booking.scheduledDate,
-          booking.scheduledTime,
+          this.normalizeScheduledTimeForHelper(booking.scheduledTime),
         );
 
       const now = new Date();
@@ -2285,7 +2292,7 @@ export class BookingsService {
       booking.scheduledStart ||
       this.getScheduledAtInSaoPaulo(
         booking.scheduledDate,
-        booking.scheduledTime,
+        this.normalizeScheduledTimeForHelper(booking.scheduledTime),
       );
     const now = new Date();
     const diffMs = now.getTime() - scheduledStart.getTime();
@@ -2309,23 +2316,23 @@ export class BookingsService {
     await this.notifyClientStatusUpdate(updated, BookingStatus.STARTED);
     // Push físico crítico: SERVICE_STARTED -> cliente
     if (updated.client?.userId) {
-      const providerName = updated.provider?.user?.fullName || 'Prestador';
-      const scheduledAt =
-        updated.scheduledStart ||
-        this.getScheduledAtInSaoPaulo(
-          updated.scheduledDate,
-          updated.scheduledTime,
-        );
-      await this.queuesService.addNotificationJob('send-notification', {
-        userId: updated.client.userId,
-        kind: 'service_started',
-        title: 'Serviço iniciado',
-        body: `${providerName} iniciou o atendimento (${scheduledAt?.toLocaleString('pt-BR') || ''}).`,
-        deeplink: `/agendamento/${updated.id}`,
-        priority: 1,
-        idempotencyKey: `notif:service_started:client:${updated.id}`,
-      });
-    }
+        const providerName = updated.provider?.user?.fullName || 'Prestador';
+        const scheduledAt =
+          updated.scheduledStart ||
+          this.getScheduledAtInSaoPaulo(
+            updated.scheduledDate,
+            this.normalizeScheduledTimeForHelper(updated.scheduledTime),
+          );
+        await this.queuesService.addNotificationJob('send-notification', {
+          userId: updated.client.userId,
+          kind: 'service_started',
+          title: 'Serviço iniciado',
+          body: `${providerName} iniciou o atendimento (${scheduledAt?.toLocaleString('pt-BR') || ''}).`,
+          deeplink: `/agendamento/${updated.id}`,
+          priority: 1,
+          idempotencyKey: `notif:service_started:client:${updated.id}`,
+        });
+      }
     this.logGpsEvent(booking.id, booking.providerId, 'startService', location);
     return updated;
   }
