@@ -912,8 +912,8 @@ export class BookingsService {
       }
 
       if (
-        createBookingDto.quoteHash &&
-        createBookingDto.quoteHash !== priceQuote.quoteHash
+        createBookingDto.quoteIdHash &&
+        createBookingDto.quoteIdHash !== priceQuote.quoteHash
       ) {
         throw new ConflictException({
           message: 'PRICE_MISMATCH',
@@ -1804,38 +1804,30 @@ export class BookingsService {
     this.logger.log(
       `[BookingsService] findUserBookings: Cláusula WHERE final: ${JSON.stringify(whereClause)}`,
     );
-
-    const bookings = await this.prisma.booking.findMany({
-      where: whereClause,
-      include: {
-        client: {
-          include: {
-            user: true,
-            address: true,
-          },
+    const bookingInclude: Prisma.BookingInclude = {
+      ...DEFAULT_BOOKING_DETAILS_INCLUDE,
+      client: {
+        include: {
+          user: true,
+          address: true,
         },
-        provider: {
-          include: {
-            user: true,
-            address: true,
-            providerServices: {
-              include: {
-                service: true,
-              },
+      },
+      provider: {
+        include: {
+          user: true,
+          address: true,
+          providerServices: {
+            include: {
+              service: true,
             },
           },
         },
-        providerService: { include: { service: true } },
-        review: true,
-        address: true,
-        subscription: true,
-        incidents: true,
-        guaranteeClaims: true,
-        coupon: true,
-        paymentIntent: true,
-        bookingInsurance: true,
-        bookingProofs: true,
       },
+    };
+
+    const bookings = await this.prisma.booking.findMany({
+      where: whereClause,
+      include: bookingInclude,
       orderBy: {
         createdAt: 'desc',
       },
