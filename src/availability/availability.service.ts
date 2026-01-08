@@ -120,7 +120,6 @@ export class AvailabilityService {
     ); // LOG 4
 
     // 2. Buscar agendamentos CONFIRMADOS para o provedor na DATA ESPECÍFICA fornecida.
-    let occupiedTimes: string[] = [];
     const bookingsOnDate = await this.prisma.booking.findMany({
       where: {
         providerId: providerId,
@@ -144,7 +143,13 @@ export class AvailabilityService {
         scheduledTime: true,
       },
     });
-    occupiedTimes = bookingsOnDate.map((b) => b.scheduledTime);
+
+    // --- CORREÇÃO TS2322: Garantindo conversão de Date para string ---
+    const occupiedTimes: string[] = bookingsOnDate.map((b) => {
+      return b.scheduledTime instanceof Date
+        ? b.scheduledTime.toISOString()
+        : String(b.scheduledTime);
+    });
 
     console.log(
       '[AvailabilityService] Horários ocupados por agendamentos:',
