@@ -1317,129 +1317,23 @@ export class ProvidersService {
       );
 
       try {
-        const rawProviders: any[] = await this.prisma.$queryRaw(Prisma.sql`
-            SELECT
-              p.id,
-              p."userId",
-              p."fullName",
-              p.phone,
-              p.bio,
-              p."yearsOfExperience",
-              p.cpf,
-              p."dateOfBirth",
-              p."avatarUrl",
-              p."verificationStatus", // NOVO: IncluÃ­do para selo
-              p."pixKey",
-              p."pixKeyMasked",
-              p."createdAt",
-              p."updatedAt",
-              p."documentPhotoFrontUrl",
-              p."documentPhotoBackUrl",
-              p."selfieWithDocumentUrl",
-              p."backgroundCheckResult",
-              p."rejectionReason",
-              p."ocrResult",
-              p."livenessResult",
-              p.badges, // NOVO: IncluÃ­do badges
-              p."acceptanceRate", // NOVO: IncluÃ­do para mÃ©tricas
-              p."averageResponseTime", // NOVO: IncluÃ­do para mÃ©tricas
-              u.email,
-              u.role,
-              u."isVerified",
-              u."fullName" AS user_fullName,
-              u."phone" AS user_phone,
-              a.id AS "addressId",
-              a.cep,
-              a.street,
-              a.number,
-              a.complement,
-              a.neighborhood,
-              a.city,
-              a.state,
-              a."providerId",
-              COALESCE(ST_X(a.location), a.longitude::double precision) AS longitude_val,
-              COALESCE(ST_Y(a.location), a.latitude::double precision) AS latitude_val,
-              CASE
-                WHEN a.location IS NOT NULL THEN
-                  ST_Distance(
-                    a.location::geography,
-                    ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography
-                  )
-                WHEN a.longitude IS NOT NULL AND a.latitude IS NOT NULL THEN
-                  ST_Distance(
-                    ST_SetSRID(ST_MakePoint(a.longitude::double precision, a.latitude::double precision), 4326)::geography,
-                    ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography
-                  )
-                ELSE NULL
-              END AS distance_m,  -- Em metros (seguro para NULL)
-              COALESCE(AVG(r.rating), 0)::numeric AS "averageRating",
-              COUNT(r.id)::int AS "reviewCount",
-              p."fiveStarReviewCount",
-              p."monthlyBookingsCount",
-              json_agg(
-                  json_build_object(
-                      'id', ps.id,
-                      'providerId', ps."providerId",
-                      'serviceId', ps."serviceId",
-                      'price', ps.price,
-                      'durationMinutes', ps."durationMinutes",
-                      'createdAt', ps."createdAt",
-                      'updatedAt', ps."updatedAt",
-                      'description', ps.description,
-                      'pricingType', ps."pricingType",
-                      'pricePerSquareMeter', ps."pricePerSquareMeter",
-                'pricePerHour', ps."pricePerHour",
-                'pricePerRoom', ps."pricePerRoom",
-                      'service', json_build_object(
-                          'id', s.id,
-                          'name', s.name,
-                          'description', s.description,
-                          'icon', s.icon,
-                          'price', s.price,
-                          'createdAt', s."createdAt",
-                          'updatedAt', s."updatedAt"
-                      )
-                  )
-                  ORDER BY ps.id
-              ) FILTER (WHERE ps.id IS NOT NULL) AS "providerServicesAgg"
-            FROM
-                "Provider" p
-            JOIN
-                "User" u ON p."userId" = u.id
-            LEFT JOIN
-                "Address" a ON p.id = a."providerId"
-            LEFT JOIN
-                "ProviderService" ps ON p.id = ps."providerId"
-            LEFT JOIN
-                "Service" s ON ps."serviceId" = s.id
-            LEFT JOIN
-                "Review" r ON p.id = r."providerId"
-                WHERE
-                    p."verificationStatus"::text = ${Prisma.raw(`'${VerificationStatus.APPROVED}'`)} AND
-                CASE
-                  WHEN a.location IS NOT NULL THEN
-                    ST_DWithin(
-                      a.location::geography,
-                      ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography,
-                      ${radius * 1000}
-                    )
-                  WHEN a.longitude IS NOT NULL AND a.latitude IS NOT NULL THEN
-                    ST_DWithin(
-                      ST_SetSRID(ST_MakePoint(a.longitude::double precision, a.latitude::double precision), 4326)::geography,
-                      ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography,
-                      ${radius * 1000}
-                    )
-                  ELSE FALSE
-                END
-                ${searchTerm ? Prisma.sql`AND (p."fullName" ILIKE ${'%' + searchTerm + '%'} OR u.email ILIKE ${'%' + searchTerm + '%'} OR p.bio ILIKE ${'%' + searchTerm + '%'} OR s.name ILIKE ${'%' + searchTerm + '%'})` : Prisma.empty}
-                ${serviceId ? Prisma.sql`AND ps."serviceId" = ${serviceId}` : Prisma.empty}
-                ${location ? Prisma.sql`AND (a.city ILIKE ${'%' + location + '%'} OR a.state ILIKE ${'%' + location + '%'} OR a.street ILIKE ${'%' + location + '%'} OR a.neighborhood ILIKE ${'%' + location + '%'})` : Prisma.empty}
-            GROUP BY
-                p.id, u.email, u.role, u."isVerified", u."fullName", u."phone", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus", p."pixKeyMasked"
-            ORDER BY
-                distance_m ASC  -- CORREÃÃO: Ordena por distance_m
-            LIMIT ${limit || 10} OFFSET ${offset || 0};
-        `);
+        const rawProviders: any[] = await this.prisma.$queryRaw(
+  Prisma.sql`
+    SELECT 
+      p.id, 
+      p."userId", 
+      p."displayName", 
+      p."avatarUrl", 
+      ST_Distance(location, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)) * 111.32 AS distance
+    FROM "Provider" p
+    JOIN "User" u ON p."userId" = u.id
+    WHERE u.status = 'ACTIVE'
+      AND p."verificationStatus" = 'APPROVED'
+      AND ST_DWithin(location, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326), ${radius / 111.32})
+    ORDER BY distance ASC
+    LIMIT ${limit} OFFSET ${offset}
+  `
+);
 
         if (rawProviders.length === 0) {
           this.logger.warn('Nenhum provedor encontrado na busca geoespacial.');
