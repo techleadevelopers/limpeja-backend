@@ -600,14 +600,12 @@ export class ProvidersService {
       },
     });
 
-    // Preenche campos ass?ncronos (nextAvailable, ranking) antes de retornar
+    // Retorna provedores pendentes sem hidratação adicional
     return Promise.all(
-  providers.map(async (p) => {
-    const mapped = this.mapProviderToCalculatedRating(p as ProviderWithIncludes);
-    // mapped.nextAvailable = undefined; // Já está assim, mantenha sem o hydrate!
-    return mapped;
-  }),
-);
+      providers.map(async (p) => {
+        return this.mapProviderToCalculatedRating(p as ProviderWithIncludes);
+      }),
+    );
   }
 
   async findOne(id: string): Promise<ProviderWithCalculatedRating | null> {
@@ -654,30 +652,6 @@ export class ProvidersService {
         // availability: true, // 👈 COMENTE OU REMOVA ESTA LINHA PARA PARAR O ERRO P2032
       },
     });
-
-    if (prismaProvider) {
-      // Como removemos o include acima, forçamos o tipo sem availability para não dar erro de tipagem
-      provider = this.mapProviderToCalculatedRating(
-        prismaProvider as any, 
-      );
-
-      await this.hydrateProviderExtras(provider);
-
-      // Opcional: Se o 'nextAvailable' for crucial, você busca ele via service aqui:
-      // const availability = await this.availabilityService.getAvailability(id, { date: new Date().toISOString() });
-      // provider.availability = availability.available;
-
-      await this.cacheService.set(
-        cacheKey,
-        provider,
-        this.PUBLIC_PROVIDERS_CACHE_TTL_SECONDS,
-      );
-      
-      this.logger.log(
-        `[ProvidersService] findOne: Provedor ${id} adicionado ao cache.`,
-      );
-      return provider;
-    }
 
     if (prismaProvider) {
       provider = this.mapProviderToCalculatedRating(
