@@ -75,6 +75,7 @@ export class BookingEntity implements PrismaBooking {
   durationMinutes: number;
   scheduledStart: Date | null;
   scheduledEnd: Date | null;
+  expiresAt: Date | null;
   isReviewed: boolean;
 
   // Construtor para facilitar a criação de instâncias (opcional, mas útil)
@@ -192,6 +193,10 @@ export class BookingEntity implements PrismaBooking {
     this.scheduledEnd = partial.scheduledEnd
       ? new Date(partial.scheduledEnd as any)
       : null;
+    this.expiresAt = partial.expiresAt
+      ? new Date(partial.expiresAt as any)
+      : null;
+
     this.isReviewed =
       partial.isReviewed !== undefined ? partial.isReviewed : false;
   }
