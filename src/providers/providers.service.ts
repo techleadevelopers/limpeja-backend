@@ -757,7 +757,7 @@ export class ProvidersService {
         reviewsReceived: {
           include: {
             client: {
-              include: { user: { select: { id: true; avatarUrl: true } } };
+              include: { user: { select: { id: true, avatarUrl: true } } }
             },
           },
         },
