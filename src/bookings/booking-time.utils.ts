@@ -58,7 +58,7 @@ function tzOffsetMinutes(date: Date, timeZone: string): number {
 
 export interface BookingScheduleInfo {
   scheduledDate: Date | string;
-  scheduledTime?: string | null;
+  scheduledTime?: string | Date | null; // Adicione Date aqui
   scheduledStart?: Date | string | null;
   startedAt?: Date | string | null;
   durationMinutes?: number | null;
