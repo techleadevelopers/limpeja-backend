@@ -32,7 +32,7 @@ import { SettingsService } from '../settings/settings.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
 
-// Type principal para provedores com todas as inclusões necessárias para mapeamento
+// Type principal para provedores com todas as inclusÃµes necessÃ¡rias para mapeamento
 export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
   include: {
     user: {
@@ -54,24 +54,27 @@ export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
       };
     };
     bookings: {
-      where: { status: 'FINISHED' }; // ✅ CORRIGIDO
+      where: { status: 'FINISHED' }; // â CORRIGIDO
       orderBy: { createdAt: 'desc' };
       take: 100;
     };
-    availability: true; // NOVO: Incluído para cálculo de nextAvailable
+    availability: true; // NOVO: IncluÃ­do para cÃ¡lculo de nextAvailable
   };
-}>;
+}> & {
+  fiveStarReviewCount?: number;
+  monthlyBookingsCount?: number;
+};
 
-// Tipo específico para a função updateProviderBadges
+// Tipo especÃ­fico para a funÃ§Ã£o updateProviderBadges
 type ProviderForBadgeUpdate = Prisma.ProviderGetPayload<{
   include: {
     user: { select: { isVerified: true } };
-    bookings: { where: { status: 'FINISHED' } }; // ✅ CORRIGIDO
+    bookings: { where: { status: 'FINISHED' } }; // â CORRIGIDO
     reviewsReceived: { where: { rating: { gte: 4 } } };
   };
 }>;
 
-// Tipo específico para a função findBestMatchingProvider
+// Tipo especÃ­fico para a funÃ§Ã£o findBestMatchingProvider
 type ProviderForSmartMatching = Prisma.ProviderGetPayload<{
   include: {
     user: { select: { isVerified: true } };
@@ -133,7 +136,7 @@ export type ProviderWithCalculatedRating = {
   updatedAt: string;
   pixKey: string | null;
   pixKeyMasked: string | null;
-  distance?: number; // CORREÇÃO: Em metros (calculado via PostGIS), opcional
+  distance?: number; // CORREÃÃO: Em metros (calculado via PostGIS), opcional
   documentPhotoFrontUrl?: string | null;
   documentPhotoBackUrl?: string | null;
   selfieWithDocumentUrl?: string | null;
@@ -150,11 +153,11 @@ export type ProviderWithCalculatedRating = {
     fullName: string;
     phone?: string | null;
   };
-  acceptanceRate?: number; // NOVO: Para métricas mini
-  averageResponseTime?: number; // NOVO: Para métricas mini
-  // NOVO: Campo para boosts de gamificação no score de ranking
+  acceptanceRate?: number; // NOVO: Para mÃ©tricas mini
+  averageResponseTime?: number; // NOVO: Para mÃ©tricas mini
+  // NOVO: Campo para boosts de gamificaÃ§Ã£o no score de ranking
   rankingBoostScore?: number; // Representa o +beta, +gamma, +delta
-  // NOVO: Para chip de horário (calculado no service)
+  // NOVO: Para chip de horÃ¡rio (calculado no service)
   nextAvailable?: { date: string; time: string };
 };
 
@@ -171,6 +174,7 @@ export class ProvidersService {
   private readonly PROVIDERS_CACHE_KEY = 'all_approved_providers';
   private readonly PROVIDER_METRICS_CACHE_KEY = 'provider_metrics';
   private readonly PROVIDER_METRICS_CACHE_TTL_SECONDS = 5 * 60;
+  private readonly MONTHLY_BOOKINGS_COUNT_CACHE_TTL_SECONDS = 5 * 60;
   private readonly PUBLIC_PROVIDERS_CACHE_TTL_SECONDS = 60;
 
   constructor(
@@ -207,7 +211,7 @@ export class ProvidersService {
     return { latitude, longitude };
   }
 
-  // Distância haversine em metros (fallback quando PostGIS/distância vinda do banco não estiver disponível)
+  // DistÃ¢ncia haversine em metros (fallback quando PostGIS/distÃ¢ncia vinda do banco nÃ£o estiver disponÃ­vel)
   private calculateDistanceMeters(
     baseLat?: number,
     baseLon?: number,
@@ -239,7 +243,7 @@ export class ProvidersService {
     return R * c;
   }
 
-  // Aplica filtro de raio salvo do provedor (serviceRadiusKm). Distância em metros.
+  // Aplica filtro de raio salvo do provedor (serviceRadiusKm). DistÃ¢ncia em metros.
   private async applyRadiusFilter(
     providers: ProviderWithCalculatedRating[],
     baseLat?: number,
@@ -268,7 +272,7 @@ export class ProvidersService {
         );
       }
       if (distance === undefined) {
-        // Sem distância calculada, mantemos para não esconder resultado inesperadamente
+        // Sem distÃ¢ncia calculada, mantemos para nÃ£o esconder resultado inesperadamente
         filtered.push(p);
         return;
       }
@@ -295,7 +299,7 @@ export class ProvidersService {
       !Number.isFinite(safeRadius)
     ) {
       throw new BadRequestException(
-        'Latitude, longitude e radius devem ser números válidos.',
+        'Latitude, longitude e radius devem ser nÃºmeros vÃ¡lidos.',
       );
     }
 
@@ -354,12 +358,12 @@ export class ProvidersService {
     `;
   }
 
-  // NOVO: Helper para calcular nextAvailable (primeiro slot futuro, alinhado com relat��rio)
+  // NOVO: Helper para calcular nextAvailable (primeiro slot futuro, alinhado com relatÇürio)
   private async calculateNextAvailable(
     providerId: string,
   ): Promise<{ date: string; time: string } | undefined> {
     const today = new Date();
-    const daysAhead = 3; // Limitado a D+2 conforme relat��rio
+    const daysAhead = 3; // Limitado a D+2 conforme relatÇürio
 
     for (let dayOffset = 0; dayOffset < daysAhead; dayOffset++) {
       const targetDate = new Date(today.getTime());
@@ -410,19 +414,19 @@ export class ProvidersService {
     const formattedCreatedAt = provider.createdAt.toISOString();
     const formattedUpdatedAt = provider.updatedAt.toISOString();
 
-    // NOVO: Calcular rankingBoostScore (placeholder, alinhado com relatório)
+    // NOVO: Calcular rankingBoostScore (placeholder, alinhado com relatÃ³rio)
     let rankingBoostScore = 0;
     if (provider.badges?.includes('TOP_RATED')) {
       rankingBoostScore += 0.05; // Exemplo: +beta
     }
-    // TODO: Adicionar lógica para outros boosts (missões, SLA chat)
+    // TODO: Adicionar lÃ³gica para outros boosts (missÃµes, SLA chat)
     // if (provider.hasActiveMissionBoost) rankingBoostScore += 0.03; // +gamma
     // if (provider.meetsChatSla) rankingBoostScore += 0.02; // +delta
 
-    // CORREÇÃO TS2339: A propriedade 'nextAvailable' não existe em ProviderWithIncludes.
-    // O cálculo de nextAvailable é assíncrono e deve ser feito no método chamador (ex: search, findOne)
-    // para evitar que mapProviderToCalculatedRating se torne assíncrona e quebre o fluxo.
-    const nextAvailable = undefined; // Inicializa como undefined. Será calculado nos métodos chamadores.
+    // CORREÃÃO TS2339: A propriedade 'nextAvailable' nÃ£o existe em ProviderWithIncludes.
+    // O cÃ¡lculo de nextAvailable Ã© assÃ­ncrono e deve ser feito no mÃ©todo chamador (ex: search, findOne)
+    // para evitar que mapProviderToCalculatedRating se torne assÃ­ncrona e quebre o fluxo.
+    const nextAvailable = undefined; // Inicializa como undefined. SerÃ¡ calculado nos mÃ©todos chamadores.
 
     return {
       id: provider.id,
@@ -433,7 +437,7 @@ export class ProvidersService {
       phone: provider.phone || provider.user?.phone || null,
       userPhone: provider.user?.phone || null,
       bio: provider.bio || null,
-      verificationStatus: provider.verificationStatus, // NOVO: Incluído para selo
+      verificationStatus: provider.verificationStatus, // NOVO: IncluÃ­do para selo
       address: provider.address ?? null,
       providerServices: provider.providerServices.map((ps) => ({
         id: ps.id,
@@ -476,7 +480,7 @@ export class ProvidersService {
       updatedAt: formattedUpdatedAt,
       pixKey: provider.pixKey || null,
       pixKeyMasked: provider.pixKeyMasked || null,
-      distance: distance, // CORREÇÃO: Incluído (em metros, calculado via PostGIS se lat/lng fornecidos)
+      distance: distance, // CORREÃÃO: IncluÃ­do (em metros, calculado via PostGIS se lat/lng fornecidos)
       documentPhotoFrontUrl: provider.documentPhotoFrontUrl,
       documentPhotoBackUrl: provider.documentPhotoBackUrl,
       selfieWithDocumentUrl: provider.selfieWithDocumentUrl,
@@ -484,7 +488,7 @@ export class ProvidersService {
       rejectionReason: provider.rejectionReason,
       ocrResult: provider.ocrResult,
       livenessResult: provider.livenessResult,
-      badges: provider.badges || [], // NOVO: Incluído badges opcionais
+      badges: provider.badges || [], // NOVO: IncluÃ­do badges opcionais
       user: {
         email: provider.user.email,
         role: provider.user.role,
@@ -492,17 +496,17 @@ export class ProvidersService {
         fullName: provider.user.fullName,
         phone: provider.user.phone,
       },
-      acceptanceRate: provider.acceptanceRate || 0, // NOVO: Default 0 para métricas
-      averageResponseTime: provider.averageResponseTime || 0, // NOVO: Default 0 para métricas
+      acceptanceRate: provider.acceptanceRate || 0, // NOVO: Default 0 para mÃ©tricas
+      averageResponseTime: provider.averageResponseTime || 0, // NOVO: Default 0 para mÃ©tricas
       rankingBoostScore: rankingBoostScore, // NOVO CAMPO
-      nextAvailable, // NOVO: Calculado para chip de horário
+      nextAvailable, // NOVO: Calculado para chip de horÃ¡rio
     };
   }
 
-  // --- NOVA FUNÇÃO: UPLOAD E ATUALIZAÇÃO DO AVATAR ---
+  // --- NOVA FUNÃÃO: UPLOAD E ATUALIZAÃÃO DO AVATAR ---
   async updateAvatar(userId: string, file: File): Promise<string> {
     this.logger.log(
-      `[ProvidersService] updateAvatar: Iniciando upload e atualização do avatar para userId: ${userId}`,
+      `[ProvidersService] updateAvatar: Iniciando upload e atualizaÃ§Ã£o do avatar para userId: ${userId}`,
     );
 
     const provider = await this.prisma.provider.findUnique({
@@ -510,9 +514,9 @@ export class ProvidersService {
     });
     if (!provider) {
       this.logger.warn(
-        `[ProvidersService] updateAvatar: Provedor com userId ${userId} não encontrado.`,
+        `[ProvidersService] updateAvatar: Provedor com userId ${userId} nÃ£o encontrado.`,
       );
-      throw new NotFoundException('Provedor não encontrado.');
+      throw new NotFoundException('Provedor nÃ£o encontrado.');
     }
 
     const fileExtension = file.originalname.split('.').pop() || 'jpg';
@@ -532,7 +536,7 @@ export class ProvidersService {
         data: { avatarUrl: fileUrl },
       });
 
-      // Invalida o cache de provedores após a atualização
+      // Invalida o cache de provedores apÃ³s a atualizaÃ§Ã£o
       await this.cacheService.del(this.PROVIDERS_CACHE_KEY);
       await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:${provider.id}`);
       await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:user:${userId}`);
@@ -557,7 +561,7 @@ export class ProvidersService {
       );
     }
   }
-  // --- FIM DA NOVA FUNÇÃO ---
+  // --- FIM DA NOVA FUNÃÃO ---
 
   async getPendingProviders(): Promise<ProviderWithCalculatedRating[]> {
     this.logger.log(
@@ -593,7 +597,7 @@ export class ProvidersService {
           },
         },
         bookings: {
-          where: { status: 'FINISHED' }, // ✅ CORRIGIDO
+          where: { status: 'FINISHED' }, // â CORRIGIDO
           orderBy: { createdAt: 'desc' },
           take: 100,
         },
@@ -601,7 +605,7 @@ export class ProvidersService {
       },
     });
 
-    // Calcula nextAvailable de forma assíncrona para cada provedor
+    // Calcula nextAvailable de forma assÃ­ncrona para cada provedor
     return Promise.all(
       providers.map(async (p) => {
         const mapped = this.mapProviderToCalculatedRating(
@@ -676,10 +680,48 @@ export class ProvidersService {
       return provider;
     }
     this.logger.log(
-      `[ProvidersService] findOne: Resultado para ID ${id}: ${prismaProvider ? 'ENCONTRADO' : 'NÃO ENCONTRADO'}`,
+      `[ProvidersService] findOne: Resultado para ID ${id}: ${prismaProvider ? 'ENCONTRADO' : 'NÃO ENCONTRADO'}`,
     );
     return null;
   }
+
+  private async resolveMonthlyBookingsCount(providerId: string): Promise<number> {
+    const cacheKey = `${this.PROVIDERS_CACHE_KEY}:${providerId}:monthlyBookingsCount`;
+    const cached = await this.cacheService.get<number>(cacheKey);
+    if (typeof cached === 'number') {
+      return cached;
+    }
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const count = await this.prisma.booking.count({
+      where: {
+        providerId,
+        status: BookingStatus.FINISHED,
+        scheduledDate: {
+          gte: startOfMonth,
+          lt: startOfNextMonth,
+        },
+      },
+    });
+
+    await this.cacheService.set(
+      cacheKey,
+      count,
+      this.MONTHLY_BOOKINGS_COUNT_CACHE_TTL_SECONDS,
+    );
+
+    return count;
+  }
+
+  private async resolveFiveStarReviewCount(providerId: string): Promise<number> {
+    return this.prisma.review.count({
+      where: { providerId, rating: 5 },
+    });
+  }
+
 
   async findByUserId(
     userId: string,
@@ -715,7 +757,7 @@ export class ProvidersService {
         reviewsReceived: {
           include: {
             client: {
-              include: { user: { select: { id: true, avatarUrl: true } } },
+              include: { user: { select: { id: true; avatarUrl: true } } };
             },
           },
         },
@@ -727,25 +769,36 @@ export class ProvidersService {
         availability: true, // NOVO: Para nextAvailable
       },
     });
-    if (prismaProvider) {
-      provider = this.mapProviderToCalculatedRating(
-        prismaProvider as ProviderWithIncludes,
-      );
-      provider.nextAvailable = await this.calculateNextAvailable(
-        prismaProvider.id,
-      ); // Calcula nextAvailable
-      await this.cacheService.set(
-        cacheKey,
-        provider,
-        this.PUBLIC_PROVIDERS_CACHE_TTL_SECONDS,
-      );
-      this.logger.log(
-        `[ProvidersService] findByUserId: Provedor para userId ${userId} adicionado ao cache.`,
-      );
-      return provider;
+
+    if (!prismaProvider) {
+      return null;
     }
-    return null;
+
+    const providerWithCounts = prismaProvider as ProviderWithIncludes;
+    const [monthlyBookingsCount, fiveStarReviewCount] = await Promise.all([
+      this.resolveMonthlyBookingsCount(providerWithCounts.id),
+      this.resolveFiveStarReviewCount(providerWithCounts.id),
+    ]);
+    providerWithCounts.monthlyBookingsCount = monthlyBookingsCount;
+    providerWithCounts.fiveStarReviewCount = fiveStarReviewCount;
+
+    provider = this.mapProviderToCalculatedRating(providerWithCounts);
+    provider.monthlyBookingsCount = monthlyBookingsCount;
+    provider.fiveStarReviewCount = fiveStarReviewCount;
+    provider.nextAvailable = await this.calculateNextAvailable(
+      providerWithCounts.id,
+    ); // Calcula nextAvailable
+    await this.cacheService.set(
+      cacheKey,
+      provider,
+      this.PUBLIC_PROVIDERS_CACHE_TTL_SECONDS,
+    );
+    this.logger.log(
+      `[ProvidersService] findByUserId: Provedor para userId ${userId} adicionado ao cache.`,
+    );
+    return provider;
   }
+
 
   async updateByUserId(
     userId: string,
@@ -760,7 +813,7 @@ export class ProvidersService {
 
     if (!provider) {
       this.logger.warn(
-        `[ProvidersService] updateByUserId: Provedor com userId ${userId} não encontrado para atualização.`,
+        `[ProvidersService] updateByUserId: Provedor com userId ${userId} nÃ£o encontrado para atualizaÃ§Ã£o.`,
       );
       return null;
     }
@@ -838,7 +891,7 @@ export class ProvidersService {
     );
     await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:user:${userId}`);
     this.logger.log(
-      `[ProvidersService] updateByUserId: Cache de provedores invalidado após atualização.`,
+      `[ProvidersService] updateByUserId: Cache de provedores invalidado apÃ³s atualizaÃ§Ã£o.`,
     );
     if (
       updatedProvider.address?.id &&
@@ -881,7 +934,7 @@ export class ProvidersService {
     const provider = await this.prisma.provider.findUnique({ where: { id } });
     if (!provider) {
       this.logger.warn(
-        `[ProvidersService] updateById: Provedor com id ${id} não encontrado para atualização.`,
+        `[ProvidersService] updateById: Provedor com id ${id} nÃ£o encontrado para atualizaÃ§Ã£o.`,
       );
       return null;
     }
@@ -956,7 +1009,7 @@ export class ProvidersService {
       `${this.PROVIDERS_CACHE_KEY}:${updatedProvider.id}`,
     );
     this.logger.log(
-      `[ProvidersService] updateById: Cache de provedores invalidado após atualização.`,
+      `[ProvidersService] updateById: Cache de provedores invalidado apÃ³s atualizaÃ§Ã£o.`,
     );
     if (
       updatedProvider.address?.id &&
@@ -995,9 +1048,9 @@ export class ProvidersService {
     });
     if (!provider) {
       this.logger.warn(
-        `[ProvidersService] remove: Provedor com ID "${id}" não encontrado.`,
+        `[ProvidersService] remove: Provedor com ID "${id}" nÃ£o encontrado.`,
       );
-      throw new NotFoundException(`Provedor com ID "${id}" não encontrado.`);
+      throw new NotFoundException(`Provedor com ID "${id}" nÃ£o encontrado.`);
     }
 
     const bookingIds = provider.bookings.map((b) => b.id);
@@ -1067,7 +1120,7 @@ export class ProvidersService {
       `${this.PROVIDERS_CACHE_KEY}:user:${provider.userId}`,
     );
     this.logger.log(
-      `[ProvidersService] remove: Cache de provedores invalidado após remoção.`,
+      `[ProvidersService] remove: Cache de provedores invalidado apÃ³s remoÃ§Ã£o.`,
     );
     this.logger.log(
       `[ProvidersService] remove: Provedor com ID ${id} removido com sucesso.`,
@@ -1175,7 +1228,7 @@ export class ProvidersService {
               p.cpf,
               p."dateOfBirth",
               p."avatarUrl",
-              p."verificationStatus", // NOVO: Incluído para selo
+              p."verificationStatus", // NOVO: IncluÃ­do para selo
               p."pixKey",
               p."pixKeyMasked",
               p."createdAt",
@@ -1187,9 +1240,9 @@ export class ProvidersService {
               p."rejectionReason",
               p."ocrResult",
               p."livenessResult",
-              p.badges, // NOVO: Incluído badges
-              p."acceptanceRate", // NOVO: Incluído para métricas
-              p."averageResponseTime", // NOVO: Incluído para métricas
+              p.badges, // NOVO: IncluÃ­do badges
+              p."acceptanceRate", // NOVO: IncluÃ­do para mÃ©tricas
+              p."averageResponseTime", // NOVO: IncluÃ­do para mÃ©tricas
               u.email,
               u.role,
               u."isVerified",
@@ -1284,7 +1337,7 @@ export class ProvidersService {
             GROUP BY
                 p.id, u.email, u.role, u."isVerified", u."fullName", u."phone", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus", p."pixKeyMasked"
             ORDER BY
-                distance_m ASC  -- CORREÇÃO: Ordena por distance_m
+                distance_m ASC  -- CORREÃÃO: Ordena por distance_m
             LIMIT ${limit || 10} OFFSET ${offset || 0};
         `);
 
@@ -1350,7 +1403,7 @@ export class ProvidersService {
                     providerId: rp.providerId,
                     latitude: rp.latitude_val || null,
                     longitude: rp.longitude_val || null,
-                    location: null, // Não incluído na query raw
+                    location: null, // NÃ£o incluÃ­do na query raw
                   } as Address)
                 : null,
               providerServices: rp.providerServicesAgg
@@ -1388,16 +1441,16 @@ export class ProvidersService {
                     },
                   }))
                 : [],
-              reviewsReceived: [], // Não incluído na query raw; calcular averageRating separadamente se necessário
-              bookings: [], // Não incluído na query raw
+              reviewsReceived: [], // NÃ£o incluÃ­do na query raw; calcular averageRating separadamente se necessÃ¡rio
+              bookings: [], // NÃ£o incluÃ­do na query raw
               availability: [], // Fetch separado para nextAvailable
             };
 
             const mappedProvider = this.mapProviderToCalculatedRating(
               providerWithIncludes,
               parseFloat(rp.distance_m),
-            ); // CORREÇÃO: Usa distance_m (em metros)
-            // O cálculo de nextAvailable é feito aqui, pois mapProviderToCalculatedRating é síncrona
+            ); // CORREÃÃO: Usa distance_m (em metros)
+            // O cÃ¡lculo de nextAvailable Ã© feito aqui, pois mapProviderToCalculatedRating Ã© sÃ­ncrona
             mappedProvider.nextAvailable = await this.calculateNextAvailable(
               rp.id,
             );
@@ -1409,7 +1462,7 @@ export class ProvidersService {
           `Erro na query RAW geoespacial em search: ${rawQueryError.message}`,
         );
         this.logger.warn(
-          'Busca geoespacial falhou. Tentando busca não-geoespacial como fallback.',
+          'Busca geoespacial falhou. Tentando busca nÃ£o-geoespacial como fallback.',
         );
       }
     }
@@ -1501,13 +1554,13 @@ export class ProvidersService {
     });
 
     this.logger.log(
-      `[ProvidersService] search (fallback): Encontrados ${providers.length} provedores após filtro.`,
+      `[ProvidersService] search (fallback): Encontrados ${providers.length} provedores apÃ³s filtro.`,
     );
 
     const providersWithCalculatedRating: ProviderWithCalculatedRating[] =
       await Promise.all(
         providers.map(async (provider) => {
-          // Fallback: se latitude/longitude foram informados, calcula distância em memória
+          // Fallback: se latitude/longitude foram informados, calcula distÃ¢ncia em memÃ³ria
           let distance: number | undefined;
           if (latitude !== undefined && longitude !== undefined) {
             distance = this.calculateDistanceMeters(
@@ -1522,7 +1575,7 @@ export class ProvidersService {
             provider as ProviderWithIncludes,
             distance,
           );
-          // O cálculo de nextAvailable é feito aqui, pois mapProviderToCalculatedRating é síncrona
+          // O cÃ¡lculo de nextAvailable Ã© feito aqui, pois mapProviderToCalculatedRating Ã© sÃ­ncrona
           mapped.nextAvailable = await this.calculateNextAvailable(provider.id);
           return mapped;
         }),
@@ -1552,18 +1605,18 @@ export class ProvidersService {
         (p) => p.averageRating >= minRating,
       );
       this.logger.log(
-        `[ProvidersService] search (fallback): Filtrados ${filteredProviders.length} provedores após minRating >= ${minRating}.`,
+        `[ProvidersService] search (fallback): Filtrados ${filteredProviders.length} provedores apÃ³s minRating >= ${minRating}.`,
       );
     }
 
     if (sortBy === SortByOption.Rating) {
       this.logger.log(
-        '[ProvidersService] search (fallback): Ordenando resultados por averageRating em memória.',
+        '[ProvidersService] search (fallback): Ordenando resultados por averageRating em memÃ³ria.',
       );
       filteredProviders.sort((a, b) => b.averageRating - a.averageRating);
     } else if (sortBy === SortByOption.Experience) {
       this.logger.log(
-        '[ProvidersService] search (fallback): Ordenando resultados por yearsOfExperience em memória.',
+        '[ProvidersService] search (fallback): Ordenando resultados por yearsOfExperience em memÃ³ria.',
       );
       filteredProviders.sort(
         (a, b) => (b.yearsOfExperience || 0) - (a.yearsOfExperience || 0),
@@ -1605,7 +1658,7 @@ export class ProvidersService {
     return this.search(searchDto);
   }
 
-  // CORREÇÃO: Agora aceita latitude/longitude opcionais pra calcular distance (via raw query PostGIS)
+  // CORREÃÃO: Agora aceita latitude/longitude opcionais pra calcular distance (via raw query PostGIS)
   async findTopRatedOrExperiencedProviders(
     latitude?: number,
     longitude?: number,
@@ -1613,7 +1666,7 @@ export class ProvidersService {
     this.logger.log(
       '[ProvidersService] findTopRatedOrExperiencedProviders: Buscando provedores mais bem avaliados/experientes.',
     );
-    // CORREÇÃO: Cache key inclui lat/lng pra evitar cache stale se localização mudar
+    // CORREÃÃO: Cache key inclui lat/lng pra evitar cache stale se localizaÃ§Ã£o mudar
     const cacheKey = `${this.PROVIDERS_CACHE_KEY}:top_rated_experienced${latitude ? `:${latitude}_${longitude}` : ''}`;
     const cachedResult =
       await this.cacheService.get<ProviderWithCalculatedRating[]>(cacheKey);
@@ -1627,7 +1680,7 @@ export class ProvidersService {
 
     let providers: any[] = [];
     if (latitude && longitude) {
-      // CORREÇÃO: Se lat/lng fornecidos, usa raw query com PostGIS pra calcular distance_m (em metros)
+      // CORREÃÃO: Se lat/lng fornecidos, usa raw query com PostGIS pra calcular distance_m (em metros)
       this.logger.log(
         `[ProvidersService] findTopRatedOrExperiencedProviders: Calculando distance com lat=${latitude}, lon=${longitude}.`,
       );
@@ -1733,14 +1786,14 @@ export class ProvidersService {
         GROUP BY
             p.id, u.email, u.role, u."isVerified", u."fullName", u."phone", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus"
         ORDER BY
-            p."yearsOfExperience" DESC,  -- Ordena principal por experiência (como original)
-            distance_m ASC  -- Secundário por distância se lat/lng fornecidos
+            p."yearsOfExperience" DESC,  -- Ordena principal por experiÃªncia (como original)
+            distance_m ASC  -- SecundÃ¡rio por distÃ¢ncia se lat/lng fornecidos
         LIMIT 50;  -- Expandido para retornar mais aprovados
       `);
       } catch (err: any) {
-        // Fallback seguro quando PostGIS/funcões geoespaciais não estão disponíveis
+        // Fallback seguro quando PostGIS/funcÃµes geoespaciais nÃ£o estÃ£o disponÃ­veis
         this.logger.error(
-          `[ProvidersService] findTopRatedOrExperiencedProviders: Falha no cálculo de distância (PostGIS indisponível?). Caindo para consulta padrão. Erro: ${err?.message || err}`,
+          `[ProvidersService] findTopRatedOrExperiencedProviders: Falha no cÃ¡lculo de distÃ¢ncia (PostGIS indisponÃ­vel?). Caindo para consulta padrÃ£o. Erro: ${err?.message || err}`,
         );
         providers = await this.prisma.provider.findMany({
           where: { verificationStatus: VerificationStatus.APPROVED },
@@ -1776,7 +1829,7 @@ export class ProvidersService {
     } else {
       // Fallback: Sem lat/lng, busca normal sem distance
       this.logger.log(
-        '[ProvidersService] findTopRatedOrExperiencedProviders: Sem lat/lng, busca sem cálculo de distância.',
+        '[ProvidersService] findTopRatedOrExperiencedProviders: Sem lat/lng, busca sem cÃ¡lculo de distÃ¢ncia.',
       );
       providers = await this.prisma.provider.findMany({
         where: {
@@ -1913,7 +1966,7 @@ export class ProvidersService {
             provider as ProviderWithIncludes,
             distance,
           );
-          // O cálculo de nextAvailable é feito aqui, pois mapProviderToCalculatedRating é síncrona
+          // O cÃ¡lculo de nextAvailable Ã© feito aqui, pois mapProviderToCalculatedRating Ã© sÃ­ncrona
           mapped.nextAvailable = await this.calculateNextAvailable(provider.id);
           return mapped;
         }),
@@ -1980,7 +2033,7 @@ export class ProvidersService {
     if (completedBookingsCount >= 50) {
       newBadges.push('HIGH_VOLUME');
     }
-    // TODO: Adicionar badges de gamificação (ex: "Missão Concluída", "Streak")
+    // TODO: Adicionar badges de gamificaÃ§Ã£o (ex: "MissÃ£o ConcluÃ­da", "Streak")
 
     const currentBadges = provider.badges;
     const badgesToAdd = newBadges.filter((b) => !currentBadges.includes(b));
@@ -1996,7 +2049,7 @@ export class ProvidersService {
       this.logger.log(
         `Provider ${providerId} badges updated: ${JSON.stringify(newBadges)}`,
       );
-      // Invalida cache após atualização de badges
+      // Invalida cache apÃ³s atualizaÃ§Ã£o de badges
       await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:${providerId}`);
       await this.cacheService.del(
         `${this.PROVIDERS_CACHE_KEY}:user:${provider.userId}`,
@@ -2034,7 +2087,7 @@ export class ProvidersService {
       },
     })) as ProviderForSmartMatching[];
 
-    // Bloco de código dentro de uma função como findBestMatchingProvider
+    // Bloco de cÃ³digo dentro de uma funÃ§Ã£o como findBestMatchingProvider
     // ...
     const scoredProviders = providers
       .map((p) => {
@@ -2044,15 +2097,15 @@ export class ProvidersService {
               p.reviewsReceived.length
             : 0;
         const completedBookings = p.bookings.filter(
-          (b) => b.status === 'FINISHED', // ✅ CORREÇÃO 1
+          (b) => b.status === 'FINISHED', // â CORREÃÃO 1
         ).length;
         const hasConflict = p.bookings.some(
           (b) =>
             b.scheduledDate.toISOString().split('T')[0] ===
               scheduledDate.toISOString().split('T')[0] &&
-            (b.status === BookingStatus.PENDING || // ✅ CORREÇÃO 2
-              b.status === BookingStatus.CONFIRMED || // ✅ CORREÇÃO 3 (Assumindo que 'CONFIRMED' é 'ACCEPTED')
-              b.status === BookingStatus.STARTED), // ✅ CORREÇÃO 4 (Assumindo que 'IN_PROGRESS' é 'STARTED')
+            (b.status === BookingStatus.PENDING || // â CORREÃÃO 2
+              b.status === BookingStatus.CONFIRMED || // â CORREÃÃO 3 (Assumindo que 'CONFIRMED' Ã© 'ACCEPTED')
+              b.status === BookingStatus.STARTED), // â CORREÃÃO 4 (Assumindo que 'IN_PROGRESS' Ã© 'STARTED')
         );
 
         let score = averageRating * 10 + completedBookings;
@@ -2070,11 +2123,11 @@ export class ProvidersService {
     return scoredProviders.map((sp) => sp.provider);
   }
 
-  // NOVO MÉTODO: Atualiza métricas de performance do provedor (aceitação, tempo de resposta)
-  // Este método seria chamado por um job agendado ou por hooks específicos (ex: ao confirmar booking, ao enviar mensagem no chat)
+  // NOVO MÃTODO: Atualiza mÃ©tricas de performance do provedor (aceitaÃ§Ã£o, tempo de resposta)
+  // Este mÃ©todo seria chamado por um job agendado ou por hooks especÃ­ficos (ex: ao confirmar booking, ao enviar mensagem no chat)
   async updateProviderPerformanceMetrics(providerId: string) {
     this.logger.log(
-      `[ProvidersService] updateProviderPerformanceMetrics: Calculando e atualizando métricas para provedor ${providerId}.`,
+      `[ProvidersService] updateProviderPerformanceMetrics: Calculando e atualizando mÃ©tricas para provedor ${providerId}.`,
     );
 
     const provider = await this.prisma.provider.findUnique({
@@ -2082,13 +2135,13 @@ export class ProvidersService {
       include: {
         bookings: {
           where: {
-            // Considerar bookings que foram aceitos/rejeitados para taxa de aceitação
+            // Considerar bookings que foram aceitos/rejeitados para taxa de aceitaÃ§Ã£o
             OR: [
               { status: BookingStatus.CONFIRMED },
               { status: BookingStatus.REJECTED },
               { status: BookingStatus.CANCELED, providerId: providerId }, // Se o provedor cancelou
             ],
-            createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }, // Últimos 30 dias
+            createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }, // Ãltimos 30 dias
           },
         },
         // TODO: Incluir mensagens de chat para calcular averageResponseTime
@@ -2098,12 +2151,12 @@ export class ProvidersService {
 
     if (!provider) {
       this.logger.warn(
-        `Provedor ${providerId} não encontrado para atualização de métricas.`,
+        `Provedor ${providerId} nÃ£o encontrado para atualizaÃ§Ã£o de mÃ©tricas.`,
       );
       return;
     }
 
-    // Lógica de cálculo da taxa de aceitação
+    // LÃ³gica de cÃ¡lculo da taxa de aceitaÃ§Ã£o
     const totalRequests = provider.bookings.length;
     const acceptedRequests = provider.bookings.filter(
       (b) => b.status === BookingStatus.CONFIRMED,
@@ -2111,9 +2164,9 @@ export class ProvidersService {
     const acceptanceRate =
       totalRequests > 0 ? (acceptedRequests / totalRequests) * 100 : 0;
 
-    // Lógica de cálculo do tempo médio de resposta (exemplo simplificado)
-    // Isso exigiria um histórico de mensagens de chat e timestamps de envio/resposta.
-    // Por exemplo, calcular a média de (tempo de resposta do provedor - tempo de envio do cliente)
+    // LÃ³gica de cÃ¡lculo do tempo mÃ©dio de resposta (exemplo simplificado)
+    // Isso exigiria um histÃ³rico de mensagens de chat e timestamps de envio/resposta.
+    // Por exemplo, calcular a mÃ©dia de (tempo de resposta do provedor - tempo de envio do cliente)
     const averageResponseTime = Math.floor(Math.random() * 60) + 5; // Exemplo: 5-64 minutos
 
     await this.prisma.provider.update({
@@ -2125,10 +2178,10 @@ export class ProvidersService {
     });
 
     this.logger.log(
-      `Métricas atualizadas para provedor ${providerId}: Aceitação: ${acceptanceRate.toFixed(2)}%, Resposta: ${averageResponseTime}min.`,
+      `MÃ©tricas atualizadas para provedor ${providerId}: AceitaÃ§Ã£o: ${acceptanceRate.toFixed(2)}%, Resposta: ${averageResponseTime}min.`,
     );
 
-    // Invalida o cache para que as novas métricas sejam buscadas
+    // Invalida o cache para que as novas mÃ©tricas sejam buscadas
     await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:${providerId}`);
     await this.cacheService.del(
       `${this.PROVIDERS_CACHE_KEY}:user:${provider.userId}`,
@@ -2158,7 +2211,7 @@ export class ProvidersService {
     }
 
     this.logger.log(
-      `[ProvidersService] getProviderPerformanceMetrics: Buscando métricas para provedor ${providerId}.`,
+      `[ProvidersService] getProviderPerformanceMetrics: Buscando mÃ©tricas para provedor ${providerId}.`,
     );
 
     const provider = await this.prisma.provider.findUnique({
@@ -2175,7 +2228,7 @@ export class ProvidersService {
 
     if (!provider) {
       throw new NotFoundException(
-        `Provedor com ID "${providerId}" não encontrado.`,
+        `Provedor com ID "${providerId}" nÃ£o encontrado.`,
       );
     }
 
@@ -2208,19 +2261,19 @@ export class ProvidersService {
 
     const offers = await this.prisma.offer.findMany({
       where: {
-        // CORREÇÃO: Usar 'target' e 'targetId' para filtrar por provedor
+        // CORREÃÃO: Usar 'target' e 'targetId' para filtrar por provedor
         OR: [
           {
             target: OfferTarget.GENERAL, // Ofertas gerais se aplicam a todos os provedores
           },
           {
             target: OfferTarget.SPECIFIC_PROVIDER,
-            targetId: providerId, // Ofertas específicas para este provedor
+            targetId: providerId, // Ofertas especÃ­ficas para este provedor
           },
         ],
         status: 'ACTIVE', // Apenas ofertas ativas
         validUntil: {
-          gte: new Date(), // Apenas ofertas que ainda não expiraram
+          gte: new Date(), // Apenas ofertas que ainda nÃ£o expiraram
         },
       },
     });
@@ -2228,7 +2281,7 @@ export class ProvidersService {
     return offers;
   }
 
-  // NOVO MÉTODO: Aplicar boost de ranking (ex: de uma missão)
+  // NOVO MÃTODO: Aplicar boost de ranking (ex: de uma missÃ£o)
   async applyRankingBoost(
     providerId: string,
     boostValue: number,
@@ -2237,7 +2290,7 @@ export class ProvidersService {
     this.logger.log(
       `[ProvidersService] applyRankingBoost: Aplicando boost de ${boostValue} para provedor ${providerId} por ${durationHours} horas.`,
     );
-    // Esta lógica dependeria de como o ranking é calculado.
+    // Esta lÃ³gica dependeria de como o ranking Ã© calculado.
     // Poderia ser um campo `rankingBoostExpiresAt` e `rankingBoostValue` no modelo Provider.
     await this.prisma.provider.update({
       where: { id: providerId },
