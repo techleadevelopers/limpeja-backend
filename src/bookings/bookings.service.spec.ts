@@ -441,7 +441,7 @@ describe('BookingsService quote & mismatch detection', () => {
   it('throws PRICE_MISMATCH when the quote hash diverges', async () => {
     const { service } = createServiceWithMocks();
     const dto = buildCreateBookingDto();
-    dto.quoteHash = 'invalid-hash';
+    dto.quoteIdHash = 'invalid-hash';
 
     await expect(
       service.create('client-user', dto, createRequest()),
