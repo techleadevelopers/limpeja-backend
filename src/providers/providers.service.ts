@@ -435,38 +435,34 @@ export class ProvidersService {
       verificationStatus: provider.verificationStatus, // NOVO: IncluÃ­do para selo
       address: provider.address ?? null,
       providerServices: provider.providerServices.map((ps) => ({
-  id: ps.id,
-  providerId: ps.providerId,
-  serviceId: ps.serviceId,
-  price: ps.price ? ps.price.toNumber() : 0,
-  durationMinutes: ps.durationMinutes,
-  description: ps.description,
-  service: {
-    id: ps.service.id,
-    name: ps.service.name,
-    description: ps.service.description,
-    icon: ps.service.icon,
-    price: ps.service.price ? ps.service.price.toNumber() : 0,
-    // Proteção para o service
-    createdAt: ps.service.createdAt instanceof Date 
-      ? ps.service.createdAt.toISOString() 
-      : new Date(ps.service.createdAt).toISOString(),
-    updatedAt: ps.service.updatedAt instanceof Date 
-      ? ps.service.updatedAt.toISOString() 
-      : new Date(ps.service.updatedAt).toISOString(),
-  },
-  // Proteção para o providerService (A correção principal)
-  createdAt: ps.createdAt instanceof Date 
-    ? ps.createdAt.toISOString() 
-    : new Date(ps.createdAt as any).toISOString(),
-  updatedAt: ps.updatedAt instanceof Date 
-    ? ps.updatedAt.toISOString() 
-    : new Date(ps.updatedAt as any).toISOString(),
-  pricingType: ps.pricingType,
-  pricePerHour: ps.pricePerHour ? ps.pricePerHour.toNumber() : 0,
-  pricePerSquareMeter: ps.pricePerSquareMeter?.toNumber() || null,
-  pricePerRoom: ps.pricePerRoom?.toNumber() || null,
-})) as ProviderServiceForFrontend[],
+        id: ps.id,
+        providerId: ps.providerId,
+        serviceId: ps.serviceId,
+        price: ps.price ? ps.price.toNumber() : 0,
+        durationMinutes: ps.durationMinutes,
+        description: ps.description,
+        service: {
+          id: ps.service.id,
+          name: ps.service.name,
+          description: ps.service.description,
+          icon: ps.service.icon,
+          price: ps.service.price ? ps.service.price.toNumber() : 0,
+          createdAt:
+            ps.service.createdAt instanceof Date
+              ? ps.service.createdAt.toISOString()
+              : ps.service.createdAt,
+          updatedAt:
+            ps.service.updatedAt instanceof Date
+              ? ps.service.updatedAt.toISOString()
+              : ps.service.updatedAt,
+        },
+        createdAt: ps.createdAt.toISOString(),
+        updatedAt: ps.updatedAt.toISOString(),
+        pricingType: ps.pricingType,
+        pricePerHour: ps.pricePerHour ? ps.pricePerHour.toNumber() : 0,
+        pricePerSquareMeter: ps.pricePerSquareMeter?.toNumber() || null,
+        pricePerRoom: ps.pricePerRoom?.toNumber() || null,
+      })) as ProviderServiceForFrontend[],
       averageRating: averageRating,
       reviewCount: provider.reviewsReceived?.length || 0,
       yearsOfExperience: provider.yearsOfExperience || 0,
@@ -612,10 +608,10 @@ export class ProvidersService {
     );
   }
 
-  async findOne(id: string, forceFull = false): Promise<ProviderWithCalculatedRating | null> {
-  this.logger.log(
-    `[ProvidersService] findOne: Buscando provedor por ID: ${id} (forceFull: ${forceFull})`,
-  );
+  async findOne(id: string): Promise<ProviderWithCalculatedRating | null> {
+    this.logger.log(
+      `[ProvidersService] findOne: Buscando provedor por ID: ${id}`,
+    );
     const cacheKey = `${this.PROVIDERS_CACHE_KEY}:${id}`;
     let provider =
       await this.cacheService.get<ProviderWithCalculatedRating>(cacheKey);
@@ -661,7 +657,7 @@ export class ProvidersService {
       provider = this.mapProviderToCalculatedRating(
         prismaProvider as ProviderWithIncludes,
       );
-      await this.hydrateProviderExtras(provider, forceFull);
+      await this.hydrateProviderExtras(provider);
       await this.cacheService.set(
         cacheKey,
         provider,
@@ -795,26 +791,48 @@ export class ProvidersService {
     return Math.round((betaBonus + gammaBonus) * 100) / 100;
   }
 
-// Localize sua função hydrateProviderExtras e deixe ela assim:
-private async hydrateProviderExtras(
-  provider: ProviderWithCalculatedRating,
-  forceFull = false, 
-) {
-  // Se for busca rápida (lista de cards), não fazemos nada pesado
-  if (!forceFull) return;
+ private async hydrateProviderExtras(
+    provider: ProviderWithCalculatedRating,
+    forceFull = false, // <--- ADICIONE ESTE PARÂMETRO COM DEFAULT FALSE
+  ): Promise<void> {
+    // SE NÃO FOR FORÇADO (BUSCA GERAL), SAIA DA FUNÇÃO PARA NÃO TRAVAR O SERVIDOR
+    if (!forceFull) {
+      provider.monthlyBookingsCount = 0;
+      provider.acceptanceRate = 0;
+      provider.nextAvailable = undefined;
+      provider.fiveStarReviewCount = 0;
+      provider.rankingBoostScore = 0;
+      return;
+    }
 
-  // Se o usuário entrou no perfil (findOne com forceFull=true)
-  // chamamos o cálculo de slots via AvailabilityService, que é SEGURO.
-  try {
-    const nextAvailable = await this.calculateNextAvailable(provider.id);
-    provider.nextAvailable = nextAvailable; // Aqui o slot aparece no front!
-    
-    // Outras métricas...
-    provider.monthlyBookingsCount = await this.resolveMonthlyBookingsCount(provider.id);
-  } catch (e) {
-    this.logger.error("Erro ao carregar slots: " + e.message);
+    // O código pesado só roda se forceFull for true (ex: no perfil do profissional)
+    try {
+      const [
+        monthlyBookingsCount,
+        acceptanceRate,
+        completedBookingsLast30Days,
+        nextAvailable,
+        fiveStarReviewCount,
+      ] = await Promise.all([
+        this.resolveMonthlyBookingsCount(provider.id),
+        this.calculateAcceptanceRate(provider.id),
+        this.countCompletedBookingsLast30Days(provider.id),
+        this.calculateNextAvailable(provider.id),
+        this.resolveFiveStarReviewCount(provider.id),
+      ]);
+
+      provider.monthlyBookingsCount = monthlyBookingsCount;
+      provider.acceptanceRate = acceptanceRate;
+      provider.rankingBoostScore = this.computeRankingBoostScore(
+        acceptanceRate,
+        completedBookingsLast30Days,
+      );
+      provider.nextAvailable = nextAvailable;
+      provider.fiveStarReviewCount = fiveStarReviewCount;
+    } catch (error) {
+      this.logger.error(`Erro ao hidratar extras do provedor ${provider.id}: ${error.message}`);
+    }
   }
-}
 
 
   async findByUserId(
@@ -1909,14 +1927,20 @@ const providerWithIncludes = {
               targetLon,
             );
           }
-          const mapped = this.mapProviderToCalculatedRating(
-            provider as ProviderWithIncludes,
-            distance,
-          );
+        const mapped = this.mapProviderToCalculatedRating(
+          provider as ProviderWithIncludes,
+          distance,
+        );
+        try {
           await this.hydrateProviderExtras(mapped);
-          return mapped;
-        }),
-      );
+        } catch (innerErr: any) {
+          this.logger.error(
+            `[ProvidersService] findTopRatedOrExperiencedProviders: falha hidrating extras para ${mapped.id}: ${innerErr?.message || innerErr}`,
+          );
+        }
+        return mapped;
+      }),
+    );
 
     // Filtra pelo raio salvo do provedor (serviceRadiusKm) se cliente forneceu lat/lon
     const radiusFiltered = await this.applyRadiusFilter(
@@ -1933,7 +1957,7 @@ const providerWithIncludes = {
     this.logger.log(
       `[ProvidersService] findTopRatedOrExperiencedProviders: Resultados adicionados ao cache.`,
     );
-    return radiusFiltered;
+    return radiusFiltered ?? [];
   }
 
   // NEW: Logic to assign/update badges
