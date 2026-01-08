@@ -53,6 +53,14 @@ const SLOT_HOLD_STRIKE_THRESHOLD = Math.max(
   ),
 );
 
+const CONFLICT_BOOKING_STATUSES = [
+  BookingStatus.PENDING,
+  BookingStatus.PENDING_PAYMENT,
+  BookingStatus.CONFIRMED,
+  BookingStatus.STARTED,
+  BookingStatus.FINISHED,
+];
+
 @Injectable()
 export class AvailabilityService {
   constructor(private prisma: PrismaService) {}
@@ -177,6 +185,21 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
     const minutesNow =
       nowInTimeZone.getUTCHours() * 60 + nowInTimeZone.getUTCMinutes();
     const todayDow = currentDayRange.dayOfWeek;
+    const nowStartDay = currentDayRange.start;
+
+    const futureBookings = await this.prisma.booking.findMany({
+      where: {
+        providerId,
+        status: {
+          in: CONFLICT_BOOKING_STATUSES,
+        },
+        scheduledDate: { gte: nowStartDay },
+      },
+      select: {
+        scheduledDate: true,
+        scheduledTime: true,
+      },
+    });
 
     for (const dto of updateAvailabilityDtos) {
       const { id, dayOfWeek, startTime, endTime, isAvailable } = dto;
@@ -202,36 +225,17 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
       }
 
       // Verifica conflito com bookings futuros (PENDING/CONFIRMED/IN_PROGRESS/COMPLETED)
-      const nowStartDay = currentDayRange.start;
-      const overlappingBooking = await this.prisma.booking.findFirst({
-        where: {
-          providerId,
-          status: {
-            in: [
-              BookingStatus.PENDING,
-              BookingStatus.PENDING_PAYMENT,
-              BookingStatus.CONFIRMED,
-              BookingStatus.STARTED,
-              BookingStatus.FINISHED,
-            ],
-          },
-          scheduledDate: { gte: nowStartDay },
-        },
-        select: {
-          scheduledDate: true,
-          scheduledTime: true,
-        },
+      const overlappingBooking = futureBookings.find((booking) => {
+        const bookingDow = getSaoPauloDayRangeFromTimestamp(
+          booking.scheduledDate.getTime(),
+        ).dayOfWeek;
+        const bookMin = this.toMinutes(booking.scheduledTime);
+        return bookingDow === dayOfWeek && bookMin < endMin && bookMin >= startMin;
       });
       if (overlappingBooking) {
-        const bookingDow = getSaoPauloDayRangeFromTimestamp(
-          overlappingBooking.scheduledDate.getTime(),
-        ).dayOfWeek;
-        const bookMin = this.toMinutes(overlappingBooking.scheduledTime);
-        if (bookingDow === dayOfWeek && bookMin < endMin && bookMin >= startMin) {
-          throw new ConflictException(
-            'Conflito com agendamento existente neste horário.',
-          );
-        }
+        throw new ConflictException(
+          'Conflito com agendamento existente neste horário.',
+        );
       }
 
       // Verifica overlap com outros slots do mesmo dia
@@ -354,18 +358,12 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
 
     // Conflito com bookings futuros
     const nowStart = dayRange.start;
-    const overlappingBooking = await this.prisma.booking.findFirst({
+    const futureBookings = await this.prisma.booking.findMany({
       where: {
         providerId,
-          status: {
-            in: [
-              BookingStatus.PENDING,
-              BookingStatus.PENDING_PAYMENT,
-              BookingStatus.CONFIRMED,
-              BookingStatus.STARTED,
-              BookingStatus.FINISHED,
-            ],
-          },
+        status: {
+          in: CONFLICT_BOOKING_STATUSES,
+        },
         scheduledDate: { gte: nowStart },
       },
       select: {
@@ -373,16 +371,17 @@ const occupiedTimes: string[] = bookingsOnDate.map((b) => {
         scheduledTime: true,
       },
     });
-    if (overlappingBooking) {
+    const overlappingBooking = futureBookings.find((booking) => {
       const bookingDow = getSaoPauloDayRangeFromTimestamp(
-        overlappingBooking.scheduledDate.getTime(),
+        booking.scheduledDate.getTime(),
       ).dayOfWeek;
-      const bookMin = this.toMinutes(overlappingBooking.scheduledTime);
-      if (bookingDow === dayOfWeek && bookMin < endMin && bookMin >= startMin) {
-        throw new ConflictException(
-          'Conflito com agendamento existente neste horário.',
-        );
-      }
+      const bookMin = this.toMinutes(booking.scheduledTime);
+      return bookingDow === dayOfWeek && bookMin < endMin && bookMin >= startMin;
+    });
+    if (overlappingBooking) {
+      throw new ConflictException(
+        'Conflito com agendamento existente neste horário.',
+      );
     }
 
     return this.prisma.availability.create({
