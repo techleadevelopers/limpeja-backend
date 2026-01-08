@@ -100,8 +100,8 @@ import { ExpireBookingsJob } from './worker/expire-bookings.job';
       useFactory: (config: ConfigService) => ({
         throttlers: [
           {
-            ttl: config.get<number>('throttle.ttl', 60) * 1000,
-            limit: config.get<number>('throttle.limit', 10),
+            ttl: config.get<number>('throttle.ttl', 120) * 1000,
+            limit: config.get<number>('throttle.limit', 30),
           },
         ],
       }),
