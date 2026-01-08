@@ -91,8 +91,18 @@ export class AvailabilityService {
       );
     }
 
-    const { start: rangeStart, end: rangeEnd, dayOfWeek: actualDayOfWeek } =
-      getSaoPauloDayRangeFromDateString(date);
+    const {
+      start: rangeStart,
+      end: rangeEnd,
+      dayOfWeek: rawDayOfWeek,
+    } = getSaoPauloDayRangeFromDateString(date);
+    const actualDayOfWeek = Number(rawDayOfWeek);
+    console.log(
+      'Buscando disponibilidade para o dia da semana:',
+      actualDayOfWeek,
+      'Tipo:',
+      typeof actualDayOfWeek,
+    );
 
     // ✅ CORREÇÃO CRÍTICA: Usando queryRaw para forçar a conversão de Timestamp para String (HH:mm)
     // Isso evita o erro "Error converting field startTime" do Prisma
@@ -101,8 +111,8 @@ export class AvailabilityService {
         id, 
         "providerId", 
         "dayOfWeek", 
-        TO_CHAR("startTime"::time, 'HH24:MI') as "startTime",
-        TO_CHAR("endTime"::time, 'HH24:MI') as "endTime",
+        TRIM(TO_CHAR("startTime"::time, 'HH24:MI'))::text as "startTime",
+        TRIM(TO_CHAR("endTime"::time, 'HH24:MI'))::text as "endTime",
         "isAvailable"
       FROM "Availability"
       WHERE "providerId" = ${providerId} 
