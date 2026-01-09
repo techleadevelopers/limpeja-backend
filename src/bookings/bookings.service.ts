@@ -1106,7 +1106,7 @@ private getScheduledAtInSaoPaulo(
         await this.paymentsService.createPixCharge(clientUserId, {
           amount: bookingTotalPrice.toNumber(),
           description:
-            createdBooking.serviceName ??
+            createdBooking.providerService?.service?.name ??
             `Pagamento do agendamento ${createdBooking.id}`,
           bookingId: createdBooking.id,
           providerId: createdBooking.providerId,
