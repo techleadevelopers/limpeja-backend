@@ -1711,6 +1711,9 @@ private getScheduledAtInSaoPaulo(
     );
 
     try {
+      this.logger.log(
+        `[BookingsService] createBookingAndPixCharge - calling PaymentsService.createPixCharge amount=${pixChargeDto.amount}`,
+      );
       const pixChargeResponse = await this.paymentsService.createPixCharge(
         clientUserId,
         pixChargeDto,
