@@ -67,6 +67,7 @@ import { LoyaltyTransactionType } from '@prisma/client';
 import { MissionsService } from '../missions/missions.service';
 import { ReferralsService } from '../referrals/referrals.service';
 import { I18nService } from '../common/i18n/i18n.service';
+import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { Request } from 'express';
 
 import { RedisLockService } from '../common/locks/redis-lock.service';
@@ -724,6 +725,44 @@ private getScheduledAtInSaoPaulo(
     return updatedBooking;
   }
 
+  async acceptBooking(
+    bookingId: string,
+    actorUserId: string,
+    request?: Request,
+  ): Promise<BookingWithDetailsRelations> {
+    const locale = (request as any)?.locale || 'pt-BR';
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
+    });
+    if (!booking) {
+      throw new NotFoundException(
+        await this.i18n.translate('booking.notFound', locale, { id: bookingId }),
+      );
+    }
+    if (booking.provider.userId !== actorUserId) {
+      throw new ForbiddenException(
+        await this.i18n.translate('booking.forbidden.updateStatus', locale),
+      );
+    }
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new BadRequestException('Apenas agendamentos confirmados podem ser aceitos.');
+    }
+    if (booking.acceptedAt) {
+      throw new BadRequestException('Agendamento já foi aceito.');
+    }
+    const updated = (await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: { acceptedAt: new Date() },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
+    })) as unknown as BookingWithDetailsRelations;
+    this.logger.log(
+      `[BookingsService] acceptBooking: Booking ${bookingId} aceito pelo provedor ${actorUserId}.`,
+    );
+    await this.notifyClientAcceptance(updated);
+    return updated;
+  }
+
   // Helper: common notification helper to inform client about provider status updates
   private async notifyClientStatusUpdate(
     booking: { id: string; client?: { userId: string } | null },
@@ -763,6 +802,29 @@ private getScheduledAtInSaoPaulo(
     } catch (e) {
       this.logger.warn(
         `[BookingsService] notifyClientStatusUpdate falhou: ${e?.message || e}`,
+      );
+    }
+  }
+
+  private async notifyClientAcceptance(
+    booking: { id: string; client?: { userId: string } | null },
+  ) {
+    const userId = booking.client?.userId;
+    if (!userId) return;
+    try {
+      await this.queuesService.addNotificationJob('send-notification', {
+        userId,
+        kind: 'booking_status',
+        title: 'Prestador aceitou seu agendamento',
+        body: 'O prestador aceitou seu agendamento e está confirmado para amanhã!',
+        targetUrl: `/client/bookings/${booking.id}`,
+        deeplink: `/agendamento/${booking.id}`,
+        priority: 1,
+        idempotencyKey: `notif:booking_accepted:${booking.id}:client`,
+      });
+    } catch (e) {
+      this.logger.warn(
+        `[BookingsService] notifyClientAcceptance falhou: ${e?.message || e}`,
       );
     }
   }
@@ -2066,11 +2128,14 @@ private getScheduledAtInSaoPaulo(
         providerId: providerId,
         status: {
           in: [
-            BookingStatus.PENDING,
             BookingStatus.CONFIRMED,
             BookingStatus.RESCHEDULED,
-            BookingStatus.STARTED, // adjusted
+            BookingStatus.STARTED,
           ],
+        },
+        acceptedAt: { not: null },
+        paymentIntent: {
+          status: PaymentIntentStatus.PAID,
         },
         scheduledDate: {
           gte: now,
@@ -2315,17 +2380,28 @@ private getScheduledAtInSaoPaulo(
     });
 
     const scheduledStart =
-      booking.scheduledStart ||
-      this.getScheduledAtInSaoPaulo(
+      booking.scheduledStart instanceof Date
+        ? booking.scheduledStart
+        : booking.scheduledStart
+          ? new Date(booking.scheduledStart)
+          : this.getScheduledAtInSaoPaulo(
         booking.scheduledDate,
         this.normalizeScheduledTimeForHelper(booking.scheduledTime),
       );
-    const now = new Date();
-    const diffMs = now.getTime() - scheduledStart.getTime();
-    const windowMs = 15 * 60 * 1000;
-    if (diffMs < -windowMs || diffMs > windowMs) {
-      throw new BadRequestException('Fora da janela de início (±15min).');
+    if (!scheduledStart) {
+      throw new BadRequestException('Horário agendado inválido.');
     }
+    const windowMs = 15 * 60 * 1000;
+    const nowUtcMs = Date.now();
+    const scheduledStartMs = scheduledStart.getTime();
+    if (nowUtcMs < scheduledStartMs - windowMs) {
+      throw new BadRequestException('Fora da janela de início (antes de -15min).');
+    }
+    if (nowUtcMs > scheduledStartMs + windowMs) {
+      throw new BadRequestException('Fora da janela de início (mais de +15min).');
+    }
+
+    const now = new Date();
 
     const gpsData = this.buildGpsFields(location, 'started');
     const updated = await this.changeBookingStatus(bookingId, BookingStatus.STARTED, {
@@ -2361,6 +2437,65 @@ private getScheduledAtInSaoPaulo(
       }
     this.logGpsEvent(booking.id, booking.providerId, 'startService', location);
     return updated;
+  }
+
+  async requestManualStart(
+    bookingId: string,
+    providerUserId: string,
+    reason?: string,
+  ): Promise<MessageResponseDto> {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: DEFAULT_BOOKING_DETAILS_INCLUDE,
+    });
+    if (!booking) {
+      throw new NotFoundException('Agendamento nao encontrado.');
+    }
+    if (booking.provider.userId !== providerUserId) {
+      throw new ForbiddenException('Somente o prestador pode solicitar o início manual.');
+    }
+    if (booking.status !== BookingStatus.ARRIVED) {
+      throw new BadRequestException('Somente atendimentos com chegada registrada podem pedir início manual.');
+    }
+
+    const sanitizedReason = (reason ?? 'GPS indisponível').trim() || 'GPS indisponível';
+    const providerName =
+      booking.provider?.fullName ?? booking.provider?.user?.fullName ?? 'Prestador';
+    const clientName = booking.client?.fullName ?? 'Cliente';
+    const scheduledStart =
+      booking.scheduledStart instanceof Date
+        ? booking.scheduledStart
+        : booking.scheduledStart
+          ? new Date(booking.scheduledStart)
+          : this.getScheduledAtInSaoPaulo(
+            booking.scheduledDate,
+            this.normalizeScheduledTimeForHelper(booking.scheduledTime),
+          );
+    const scheduledLabel = scheduledStart
+      ? scheduledStart.toLocaleString('pt-BR', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+        })
+      : `${booking.scheduledDate} ${booking.scheduledTime || ''}`.trim();
+    const messageBody = `${providerName} solicitou início manual para ${clientName} (${booking.id}) agendado para ${scheduledLabel}. ${sanitizedReason}`;
+
+    await this.queuesService.addNotificationJob('send-notification', {
+      userId: 'ADMIN_USER_ID',
+      kind: 'manual_start_request',
+      title: 'Início manual solicitado',
+      body: messageBody,
+      deeplink: `/admin/bookings/${bookingId}`,
+      priority: 1,
+      idempotencyKey: `manual-start:${bookingId}:${Date.now()}`,
+    });
+
+    this.logger.warn(
+      `[BookingsService] manual start request for booking ${bookingId}: ${sanitizedReason}`,
+    );
+
+    return {
+      message: 'Solicitação enviada para revisão do time de operações.',
+    };
   }
 
   async completeService(
