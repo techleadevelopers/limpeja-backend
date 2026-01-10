@@ -4,7 +4,6 @@
       "phone_invalid": "Telefone inválido. Formato esperado (XX) XXXXX-XXXX."
     },
     "common": {
-      "got_it": "Entendi",
       "loading": "Carregando...",
       "error": "Erro",
       "tryAgain": "Tentar Novamente",
@@ -196,13 +195,7 @@
       "no_slots_title": "Buscando Horários",
       "found_available_date": "Horários encontrados!",
       "error_fetching_slots_day": "Erro ao carregar horários para este dia. Tente novamente.",
-      "no_available_nearby": "Nenhum horário nos próximos 7 dias. Selecione outra data no calendário.",
-    "insurance_default_label": "Sem proteção",
-    "progress_step_insurance": "Seguro",
-    "provider_rate_limited": "Você atingiu o limite de requisições. Aguarde alguns segundos.",
-    "continue_button": "Continuar",
-    "estimated_total": "Total estimado"
-  }
+      "no_available_nearby": "Nenhum horário nos próximos 7 dias. Selecione outra data no calendário."
     },
     "provider_details": {
       "loading": "Carregando...",
@@ -367,5 +360,6 @@
     "recent_points": "Movimentações recentes",
     "no_history": "Nenhuma movimentação por enquanto."
   }
+}
 }
 
