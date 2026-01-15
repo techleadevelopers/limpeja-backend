@@ -20,6 +20,7 @@ import { RedisLockModule } from '../common/locks/redis-lock.module'; // NOVO: Im
 import { I18nModule } from '../common/i18n/i18n.module'; // NOVO: Importar I18nModule
 import { CacheModule } from '../cache/cache.module';
 import { SchedulerModule } from '../scheduler/scheduler.module';
+import { ServicesModule } from '../services/services.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { SchedulerModule } from '../scheduler/scheduler.module';
     forwardRef(() => ReferralsModule),
     RedisLockModule, // NOVO: Adicionar RedisLockModule
     CacheModule,
+    ServicesModule,
     I18nModule, // NOVO: Adicionar I18nModule
     SchedulerModule,
   ],
