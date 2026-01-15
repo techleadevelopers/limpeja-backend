@@ -41,7 +41,7 @@ import { ReportDisputeDto } from './dto/report-dispute.dto';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { ManualStartRequestDto } from './dto/manual-start-request.dto';
 import { I18nService } from '../common/i18n/i18n.service';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { SkipThrottle, Throttle, ThrottlerGuard } from '@nestjs/throttler';
 
 type RequestWithUser = Request & {
   user: {
@@ -234,6 +234,7 @@ export class BookingsController {
   }
 
   @Get('me')
+  @SkipThrottle()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
