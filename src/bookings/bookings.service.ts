@@ -1,4 +1,5 @@
 ﻿/* eslint-disable no-case-declarations */
+import dayjs from 'dayjs';
 import {
   Injectable,
   NotFoundException,
@@ -35,6 +36,12 @@ import { AvailabilityService } from '../availability/availability.service';
 import { ProviderWithCalculatedRating } from '../providers/providers.service';
 import { ProviderServicesService } from '../provider-services/provider-services.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationService } from '../services/NotificationService';
+import { ComplianceService } from '../compliance/compliance.service';
+import {
+  ConsentDocumentType,
+  DEFAULT_CONSENT_VERSIONS,
+} from '../compliance/compliance.constants';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { BookingAndPixResponseDto } from './dto/booking-and-pix-response.dto';
 import { PaymentsService } from '../payments/payments.service';
@@ -199,6 +206,8 @@ export class BookingsService {
     private availabilityService: AvailabilityService,
     private providerServicesService: ProviderServicesService,
     private notificationsService: NotificationsService,
+    private notificationService: NotificationService,
+    private complianceService: ComplianceService,
     private queuesService: QueuesService,
     private pricingService: PricingService,
     private couponsService: CouponsService,
@@ -770,6 +779,7 @@ private getScheduledAtInSaoPaulo(
   ) {
     const userId = booking.client?.userId;
     if (!userId) return;
+    if (status === BookingStatus.STARTED) return;
     let title = 'Atualização de atendimento';
     let body = 'Status do seu atendimento atualizado.';
     if (status === BookingStatus.ON_THE_WAY) {
@@ -778,9 +788,6 @@ private getScheduledAtInSaoPaulo(
     } else if (status === BookingStatus.ARRIVED) {
       title = 'Prestador chegou';
       body = `O prestador chegou ao local para o atendimento ${booking.id}.`;
-    } else if (status === BookingStatus.STARTED) {
-      title = 'Serviço iniciado';
-      body = `O prestador iniciou o serviço ${booking.id}.`;
     } else if (status === BookingStatus.FINISHED) {
       title = 'Serviço finalizado';
       body = `O prestador finalizou o serviço ${booking.id}.`;
@@ -802,6 +809,30 @@ private getScheduledAtInSaoPaulo(
     } catch (e) {
       this.logger.warn(
         `[BookingsService] notifyClientStatusUpdate falhou: ${e?.message || e}`,
+      );
+    }
+  }
+
+  private async sendNativeBookingPush(
+    booking: { id: string; client?: { user?: { fcmToken?: string } | null } | null },
+    title: string,
+    body: string,
+  ) {
+    const token = booking.client?.user?.fcmToken;
+    if (!token) {
+      this.logger.debug(
+        `[BookingsService] Native push skipped for booking ${booking.id} (client token missing).`,
+      );
+      return;
+    }
+    try {
+      await this.notificationService.sendPush(token, title, body);
+      this.logger.log(`[BookingsService] Native push sent for booking ${booking.id}.`);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `[BookingsService] Falha ao enviar push nativo para ${booking.id}: ${
+          error instanceof Error ? error.message : error
+        }`,
       );
     }
   }
@@ -904,6 +935,18 @@ private getScheduledAtInSaoPaulo(
       this.logger.log(
         `[BookingsService] create - Cliente encontrado: ${client.id}`,
       );
+
+      const hasAcceptedTerms = await this.complianceService.checkConsent(
+        clientUserId,
+        ConsentDocumentType.TERMS,
+        DEFAULT_CONSENT_VERSIONS[ConsentDocumentType.TERMS],
+      );
+      if (!hasAcceptedTerms) {
+        this.logger.warn(
+          `[BookingsService] create - Cliente ${client.id} nao aceitou os Termos de Uso.`,
+        );
+        throw new ForbiddenException('terms-not-accepted');
+      }
 
       const provider = await this.providersService.findOne(
         createBookingDto.providerId,
@@ -1694,10 +1737,10 @@ private getScheduledAtInSaoPaulo(
           clientId: data.clientId,
           providerId: data.providerId,
           providerServiceId: data.providerServiceId,
-        scheduledDate: new Date(`${data.scheduledDate}T00:00:00.000Z`),
-        scheduledTime: data.scheduledTime,
-        scheduledStart,
-        durationMinutes,
+          scheduledDate: new Date(`${data.scheduledDate}T00:00:00.000Z`),
+          scheduledTime: scheduledStart,
+          scheduledStart,
+          durationMinutes,
           scheduledEnd,
           totalPrice: new Prisma.Decimal(data.totalPrice),
           subscriptionId: data.subscriptionId,
@@ -1705,7 +1748,7 @@ private getScheduledAtInSaoPaulo(
           status: BookingStatus.PENDING_PAYMENT,
           expiresAt: new Date(Date.now() + PENDING_PAYMENT_TIMEOUT_MS),
         },
-      include: {
+        include: {
         client: { include: { user: true } },
         provider: { include: { user: true } },
         providerService: { include: { service: true } },
@@ -2120,8 +2163,7 @@ private getScheduledAtInSaoPaulo(
     this.logger.log(
       `[BookingsService] findUpcomingBookings: Buscando agendamentos futuros para providerId: ${providerId}`,
     );
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
+    const now = dayjs().startOf('day').toDate();
 
     const upcomingPrismaBookings = await this.prisma.booking.findMany({
       where: {
@@ -2416,25 +2458,11 @@ private getScheduledAtInSaoPaulo(
 
     // side-effects: notifications
     await this.notifyClientStatusUpdate(updated, BookingStatus.STARTED);
-    // Push físico crítico: SERVICE_STARTED -> cliente
-    if (updated.client?.userId) {
-        const providerName = updated.provider?.user?.fullName || 'Prestador';
-        const scheduledAt =
-          updated.scheduledStart ||
-          this.getScheduledAtInSaoPaulo(
-            updated.scheduledDate,
-            this.normalizeScheduledTimeForHelper(updated.scheduledTime),
-          );
-        await this.queuesService.addNotificationJob('send-notification', {
-          userId: updated.client.userId,
-          kind: 'service_started',
-          title: 'Serviço iniciado',
-          body: `${providerName} iniciou o atendimento (${scheduledAt?.toLocaleString('pt-BR') || ''}).`,
-          deeplink: `/agendamento/${updated.id}`,
-          priority: 1,
-          idempotencyKey: `notif:service_started:client:${updated.id}`,
-        });
-      }
+    await this.sendNativeBookingPush(
+      updated,
+      'Sua faxina começou! 🚀',
+      'Seu prestador iniciou o atendimento no seu endereço.',
+    );
     this.logGpsEvent(booking.id, booking.providerId, 'startService', location);
     return updated;
   }
@@ -2588,6 +2616,12 @@ private getScheduledAtInSaoPaulo(
       );
     }
 
+
+    await this.sendNativeBookingPush(
+      updated,
+      'Serviço finalizado',
+      `Seu atendimento com ${updated.provider?.user?.fullName || 'prestador'} foi finalizado.`,
+    );
     this.logGpsEvent(booking.id, booking.providerId, 'completeService', location);
     return updated;
   }
@@ -2656,6 +2690,12 @@ private getScheduledAtInSaoPaulo(
           `[BookingsService] Falha ao notificar finalização automática do booking ${updated.id}: ${e?.message || e}`,
         );
       }
+      await this.sendNativeBookingPush(
+        updated,
+        'Serviço finalizado',
+        `Seu atendimento com ${updated.provider?.user?.fullName || 'prestador'} foi finalizado.`,
+      );
+
     }
 
     return { completed: toComplete.map((b) => b.id) };
