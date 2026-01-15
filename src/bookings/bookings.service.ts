@@ -595,6 +595,7 @@ private getScheduledAtInSaoPaulo(
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
+        client: { select: { userId: true } },
         provider: { include: { user: true } },
         bookingInsurance: true,
         bookingProofs: true,
@@ -647,6 +648,22 @@ private getScheduledAtInSaoPaulo(
         `submit-proof-${type}`,
         payload.location,
       );
+      const clientUserId = booking.client?.userId;
+      if (clientUserId) {
+        await this.notificationService.sendToUser(
+          clientUserId,
+          'Transparência total! ✨',
+          'Fotos do andamento da sua faxina foram enviadas.',
+          { bookingId, proofId: proof.id, proofType: type },
+        );
+        this.logger.log(
+          `[Push] BookingProof ${proof.id} | Cliente ${clientUserId} | booking ${bookingId}`,
+        );
+      } else {
+        this.logger.warn(
+          `[Push] BookingProof ${proof.id} | Booking ${bookingId} | motivo: clientId ausente`,
+        );
+      }
       return proof;
     } catch (error: any) {
       if (
@@ -809,30 +826,6 @@ private getScheduledAtInSaoPaulo(
     } catch (e) {
       this.logger.warn(
         `[BookingsService] notifyClientStatusUpdate falhou: ${e?.message || e}`,
-      );
-    }
-  }
-
-  private async sendNativeBookingPush(
-    booking: { id: string; client?: { user?: { fcmToken?: string } | null } | null },
-    title: string,
-    body: string,
-  ) {
-    const token = booking.client?.user?.fcmToken;
-    if (!token) {
-      this.logger.debug(
-        `[BookingsService] Native push skipped for booking ${booking.id} (client token missing).`,
-      );
-      return;
-    }
-    try {
-      await this.notificationService.sendPush(token, title, body);
-      this.logger.log(`[BookingsService] Native push sent for booking ${booking.id}.`);
-    } catch (error: unknown) {
-      this.logger.warn(
-        `[BookingsService] Falha ao enviar push nativo para ${booking.id}: ${
-          error instanceof Error ? error.message : error
-        }`,
       );
     }
   }
@@ -1242,6 +1235,32 @@ private getScheduledAtInSaoPaulo(
 
         if (couponId) {
           await this.couponsService.markCouponAsUsed(couponId);
+          const clientUserIdForCoupon = createdBooking.client?.userId;
+          if (clientUserIdForCoupon) {
+            const serviceName =
+              createdBooking.providerService?.service?.name ?? undefined;
+            try {
+              await this.notificationService.sendToUser(
+                clientUserIdForCoupon,
+                'Presente para você! 🎁',
+                'Um cupom de desconto exclusivo acaba de chegar. Aproveite!',
+                {
+                  bookingId: createdBooking.id,
+                  couponId,
+                  serviceName,
+                },
+              );
+              this.logger.log(
+                `[Push] Cupom ${couponId} notificado para user ${clientUserIdForCoupon}`,
+              );
+            } catch (error) {
+              this.logger.warn(
+                `[BookingsService] Falha ao notificar cupom ${couponId} para user ${clientUserIdForCoupon}: ${
+                  error instanceof Error ? error.message : JSON.stringify(error)
+                }`,
+              );
+            }
+          }
         }
 
         if (idempotencyNodeKey) {
@@ -2458,11 +2477,30 @@ private getScheduledAtInSaoPaulo(
 
     // side-effects: notifications
     await this.notifyClientStatusUpdate(updated, BookingStatus.STARTED);
-    await this.sendNativeBookingPush(
-      updated,
-      'Sua faxina começou! 🚀',
-      'Seu prestador iniciou o atendimento no seu endereço.',
-    );
+    const providerName =
+      updated.provider?.user?.fullName ??
+      updated.provider?.fullName ??
+      'Prestador';
+    const clientUserId = updated.client?.userId;
+    if (clientUserId) {
+      await this.notificationService.sendToUser(
+        clientUserId,
+        `${providerName} chegou! 🏠 Sua faxina começou.`,
+        'Relaxe, cuidaremos de tudo para você.',
+        {
+          bookingId: updated.id,
+          status: BookingStatus.STARTED,
+          providerName,
+        },
+      );
+      this.logger.log(
+        `[Push] Booking ID: ${updated.id} | Destinatário: ${updated.client?.id} | Status: ${BookingStatus.STARTED}`,
+      );
+    } else {
+      this.logger.warn(
+        `[Push] Booking ID: ${updated.id} | Destinatário: ${updated.client?.id} | Status: ${BookingStatus.STARTED} | motivo: clientId ausente`,
+      );
+    }
     this.logGpsEvent(booking.id, booking.providerId, 'startService', location);
     return updated;
   }
@@ -2617,10 +2655,10 @@ private getScheduledAtInSaoPaulo(
     }
 
 
-    await this.sendNativeBookingPush(
-      updated,
-      'Serviço finalizado',
-      `Seu atendimento com ${updated.provider?.user?.fullName || 'prestador'} foi finalizado.`,
+    await this.notificationService.notifyBookingStatusPush(
+      updated.id,
+      updated.client?.id ?? null,
+      BookingStatus.FINISHED,
     );
     this.logGpsEvent(booking.id, booking.providerId, 'completeService', location);
     return updated;
@@ -2690,10 +2728,10 @@ private getScheduledAtInSaoPaulo(
           `[BookingsService] Falha ao notificar finalização automática do booking ${updated.id}: ${e?.message || e}`,
         );
       }
-      await this.sendNativeBookingPush(
-        updated,
-        'Serviço finalizado',
-        `Seu atendimento com ${updated.provider?.user?.fullName || 'prestador'} foi finalizado.`,
+      await this.notificationService.notifyBookingStatusPush(
+        updated.id,
+        updated.client?.id ?? null,
+        BookingStatus.FINISHED,
       );
 
     }
