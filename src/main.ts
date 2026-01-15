@@ -241,18 +241,10 @@ async function bootstrap() {
   // =======================================================
   //                    FIREBASE ADMIN
   // =======================================================
-const projectId = configService.get<string>('FIREBASE_PROJECT_ID');
-const clientEmail = configService.get<string>('FIREBASE_CLIENT_EMAIL');
-// O replace abaixo converte o texto "\n" em quebras de linha reais
-const privateKey = configService.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n');
-
-const hasEnvCredentials = Boolean(projectId && clientEmail && privateKey);
-
-if (hasEnvCredentials) {
-  console.log('[Firebase Admin] Inicializando via variáveis de ambiente...');
-} else {
-  console.warn('[Firebase Admin] Variáveis de ambiente incompletas para o Firebase.');
-}
+  const projectId = configService.get<string>('FIREBASE_PROJECT_ID');
+  const clientEmail = configService.get<string>('FIREBASE_CLIENT_EMAIL');
+  const privateKey = configService.get<string>('FIREBASE_PRIVATE_KEY');
+  const hasEnvCredentials = Boolean(projectId && clientEmail && privateKey);
 
   try {
     if (hasEnvCredentials) {
