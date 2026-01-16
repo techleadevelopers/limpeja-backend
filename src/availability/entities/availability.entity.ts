@@ -4,11 +4,15 @@ export class AvailabilityEntity implements PrismaAvailability {
   id: string;
   providerId: string;
   dayOfWeek: number;
+  
+  // Campo restaurado para bater com o schema.prisma e evitar o erro TS2420
+  date: Date | null;
+
   // Ajuste de tipagem para compatibilidade com o novo Prisma
   startTime: string | any; 
   endTime: string | any;
   isAvailable: boolean;
-  createdAt: Date; // O Prisma costuma exigir esses campos na interface
+  createdAt: Date; 
   updatedAt: Date;
 
   constructor(partial: Partial<AvailabilityEntity>) {
