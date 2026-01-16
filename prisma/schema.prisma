@@ -467,6 +467,9 @@ model Provider {
   monthlyBookingsCount    Int                @default(0)
   badges                  String[]
 
+  latitude                Float?
+  longitude               Float?
+
   // Pagamentos (PIX)
   pixKey                  String?
   pixKeyMasked            String?
@@ -609,6 +612,7 @@ model Booking {
   bookingInsurance BookingInsurance?
   bookingProofs    BookingProof[]
   notificationSchedules NotificationSchedule[]
+  notificationLogs NotificationLog[]
   policyHits        MessagePolicyHit[]
 
   // Metadata
@@ -757,6 +761,32 @@ model NotificationSchedule {
   @@index([status, runAt])
 }
 
+model NotificationLog {
+  id            String          @id @default(uuid())
+  bookingId     String
+  booking       Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  status        BookingStatus?
+  messageKey    String
+  recipientPhone String?
+  payload       Json?
+  externalMessageId String?
+  createdAt     DateTime        @default(now())
+
+  @@index([bookingId, status, messageKey])
+  @@index([externalMessageId])
+  @@map("NotificationLogs")
+}
+
+model WhatsappWebhookLog {
+  id            String   @id @default(uuid())
+  messageId     String?
+  phone         String?
+  text          String?
+  status        String?
+  payload       Json?
+  createdAt     DateTime @default(now())
+}
+
 model Review {
   id         String   @id @default(uuid())
   booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
@@ -855,6 +885,7 @@ model Availability {
   providerId  String
   provider    Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
   dayOfWeek   Int
+  date        DateTime?
   startTime   String
   endTime     String
   isAvailable Boolean  @default(true)
