@@ -237,7 +237,6 @@ async function bootstrap() {
   //                  TRACING INTERCEPTOR
   // =======================================================
   app.useGlobalInterceptors(app.get(TracingInterceptor));
-
   // =======================================================
   //                    FIREBASE ADMIN
   // =======================================================
