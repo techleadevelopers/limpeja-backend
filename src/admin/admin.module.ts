@@ -12,6 +12,7 @@ import { AdminPaymentsController } from './admin-payments.controller';
 import { AdminHealthController } from './admin-health.controller';
 import { AdminObservabilityService } from './admin-observability.service';
 import { AdminProvidersController } from './admin-providers.controller';
+import { CacheModule } from '../cache/cache.module';
 import { ObservabilityModule } from '../observability/observability.module';
 import { ProvidersModule } from '../providers/providers.module';
 
@@ -22,6 +23,7 @@ import { ProvidersModule } from '../providers/providers.module';
     SettingsModule,
     forwardRef(() => PaymentsModule),
     forwardRef(() => BookingsModule),
+    CacheModule,
     ObservabilityModule,
     ProvidersModule,
   ],
