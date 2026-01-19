@@ -33,11 +33,17 @@ export class WhatsappWebhookController {
       await this.updateNotificationLog(messageId, status, body);
     }
 
+    const webhookPayload: Prisma.JsonObject = {
+      event,
+      instanceId,
+      raw: body as Prisma.JsonObject,
+    };
+
     await this.prisma.whatsappWebhookLog.create({
       data: {
-        event,
-        instanceId,
-        data: body as Prisma.JsonObject,
+        messageId,
+        status,
+        payload: webhookPayload,
       },
     });
 
