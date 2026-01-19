@@ -97,13 +97,22 @@ export class AdminObservabilityService {
 
   async getSnapshot(): Promise<AdminHealthSnapshot> {
     try {
+      const dbLatencyPromise = this.checkDbLatency()
+        .then((value) => ({ ok: true, value }))
+        .catch((reason) => {
+          this.logger.warn(
+            `[AdminHealth] Falha ao medir latência do DB: ${String(reason)}`,
+          );
+          return { ok: false, value: 0 };
+        });
+
       const [
-        dbLatency,
+        dbLatencyResult,
         activeSessions,
         insuranceConversion,
         latencySeries,
       ] = await Promise.all([
-        this.checkDbLatency().catch(() => 0),
+        dbLatencyPromise,
         this.estimateActiveSessions().catch(() => 0),
         this.computeInsuranceConversion().catch(() => ({
           completedBookings: 0,
@@ -124,7 +133,8 @@ export class AdminObservabilityService {
         this.buildSentryError('Sentry Offline'),
       );
 
-      const dbHealthy = dbLatency > 0;
+      const dbHealthy = dbLatencyResult.ok;
+      const dbLatency = dbLatencyResult.value;
 
       return {
         status: dbHealthy ? 'ok' : 'degraded',
@@ -134,9 +144,9 @@ export class AdminObservabilityService {
           latencyMs: dbLatency,
         },
         memory: {
-          heapUsedMb: Number((memory.heapUsed / 1024 / 1024).toFixed(2)),
-          heapTotalMb: Number((memory.heapTotal / 1024 / 1024).toFixed(2)),
-          rssMb: Number((memory.rss / 1024 / 1024).toFixed(2)),
+          heapUsedMb: memory.heapUsed / 1024 / 1024,
+          heapTotalMb: memory.heapTotal / 1024 / 1024,
+          rssMb: memory.rss / 1024 / 1024,
         },
         activeSessions,
         insuranceConversion,
