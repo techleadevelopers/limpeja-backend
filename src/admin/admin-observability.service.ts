@@ -159,9 +159,9 @@ export class AdminObservabilityService {
         latencyMs: 0,
       },
       memory: {
-        heapUsedMb: Number((memory.heapUsed / 1024 / 1024).toFixed(2)),
-        heapTotalMb: Number((memory.heapTotal / 1024 / 1024).toFixed(2)),
-        rssMb: Number((memory.rss / 1024 / 1024).toFixed(2)),
+        heapUsedMb: memory.heapUsed / 1024 / 1024,
+        heapTotalMb: memory.heapTotal / 1024 / 1024,
+        rssMb: memory.rss / 1024 / 1024,
       },
       activeSessions: 0,
       insuranceConversion: {
