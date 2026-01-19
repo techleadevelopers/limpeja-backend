@@ -101,15 +101,17 @@ export class AdminObservabilityService {
   async getSnapshot(): Promise<AdminHealthSnapshot> {
     const start = Date.now();
 
-    // Executa todas as tarefas simultaneamente
+    // Executa as tarefas do snapshot em paralelo, mas isola DB/Sentry para tolerar falhas
     const [
-      dbLatencyMs,
+      [dbResult, sentryResult],
       activeSessions,
       latencySeries,
       insuranceConversion,
-      sentrySnapshot,
     ] = await Promise.all([
-      this.checkDbLatency(),
+      Promise.allSettled([
+        this.checkDbLatency(),
+        this.fetchSentrySnapshot(), // Esta é a chamada que mais demora
+      ]),
       this.estimateActiveSessions(),
       Promise.resolve(
         this.observabilityService.getLatencySeries('/search', {
@@ -118,8 +120,36 @@ export class AdminObservabilityService {
         }),
       ),
       this.computeInsuranceConversion(),
-      this.fetchSentrySnapshot(), // Esta é a chamada que mais demora
     ]);
+
+    const dbLatencyMs =
+      dbResult.status === 'fulfilled' ? dbResult.value : 0;
+
+    if (dbResult.status === 'rejected') {
+      this.logger.warn(
+        `[AdminHealth] Falha ao medir latência do DB: ${String(
+          dbResult.reason,
+        )}`,
+      );
+    }
+
+    const sentrySnapshot =
+      sentryResult.status === 'fulfilled'
+        ? sentryResult.value
+        : this.buildSentryError(
+            `Falha ao consultar o Sentry: ${
+              (sentryResult.reason as Error)?.message ??
+              String(sentryResult.reason)
+            }`,
+          );
+
+    if (sentryResult.status === 'rejected') {
+      this.logger.warn(
+        `[AdminHealth] A coleta do Sentry falhou: ${String(
+          sentryResult.reason,
+        )}`,
+      );
+    }
 
     const elapsedMs = Number((Date.now() - start).toFixed(2));
     this.logger.debug(`[AdminHealth] snapshot ready in ${elapsedMs} ms`);
@@ -147,7 +177,8 @@ export class AdminObservabilityService {
   }
 
   private mapMemoryUsage(memory: NodeJS.MemoryUsage): MemoryUsageSnapshot {
-    const toMb = (value: number) => Number((value / 1024 / 1024).toFixed(2));
+    const toMb = (value?: number) =>
+      Number((((value ?? 0) / 1024 / 1024).toFixed(2)));
     return {
       rssMb: toMb(memory.rss),
       heapUsedMb: toMb(memory.heapUsed),
