@@ -1,7 +1,6 @@
 import {
   Injectable,
   Logger,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
@@ -66,10 +65,10 @@ interface MemoryUsageSnapshot {
 }
 
 export interface AdminHealthSnapshot {
-  status: 'ok';
+  status: 'ok' | 'degraded';
   timestamp: string;
   db: {
-    status: 'up';
+    status: 'up' | 'down';
     latencyMs: number;
   };
   memory: MemoryUsageSnapshot;
@@ -97,73 +96,82 @@ export class AdminObservabilityService {
   ) {}
 
   async getSnapshot(): Promise<AdminHealthSnapshot> {
-    const start = Date.now();
+    try {
+      const [
+        dbLatency,
+        activeSessions,
+        insuranceConversion,
+        latencySeries,
+      ] = await Promise.all([
+        this.checkDbLatency().catch(() => 0),
+        this.estimateActiveSessions().catch(() => 0),
+        this.computeInsuranceConversion().catch(() => ({
+          completedBookings: 0,
+          insuredBookings: 0,
+          insuredRate: 0,
+          breakdown: [],
+        })),
+        Promise.resolve(
+          this.observabilityService.getLatencySeries('/search', {
+            windowHours: 6,
+            points: 12,
+          }),
+        ).catch(() => []),
+      ]);
 
-    // Executa as tarefas do snapshot em paralelo, mas isola DB/Sentry para tolerar falhas
-    const [
-      [dbResult, sentryResult],
-      activeSessions,
-      latencySeries,
-      insuranceConversion,
-    ] = await Promise.all([
-      Promise.allSettled([
-        this.checkDbLatency(),
-        this.fetchSentrySnapshot(), // Esta é a chamada que mais demora
-      ]),
-      this.estimateActiveSessions(),
-      Promise.resolve(
-        this.observabilityService.getLatencySeries('/search', {
-          windowHours: 6,
-          points: 12,
-        }),
-      ),
-      this.computeInsuranceConversion(),
-    ]);
-
-    const dbLatencyMs =
-      dbResult.status === 'fulfilled' ? dbResult.value : 0;
-
-    if (dbResult.status === 'rejected') {
-      this.logger.warn(
-        `[AdminHealth] Falha ao medir latência do DB: ${String(
-          dbResult.reason,
-        )}`,
+      const memory = process.memoryUsage();
+      const sentrySnapshot = await this.fetchSentrySnapshot().catch(() =>
+        this.buildSentryError('Sentry Offline'),
       );
+
+      const dbHealthy = dbLatency > 0;
+
+      return {
+        status: dbHealthy ? 'ok' : 'degraded',
+        timestamp: new Date().toISOString(),
+        db: {
+          status: dbHealthy ? 'up' : 'down',
+          latencyMs: dbLatency,
+        },
+        memory: {
+          heapUsedMb: Number((memory.heapUsed / 1024 / 1024).toFixed(2)),
+          heapTotalMb: Number((memory.heapTotal / 1024 / 1024).toFixed(2)),
+          rssMb: Number((memory.rss / 1024 / 1024).toFixed(2)),
+        },
+        activeSessions,
+        insuranceConversion,
+        latencySeries,
+        sentry: sentrySnapshot,
+      };
+    } catch (error) {
+      this.logger.error('Falha crítica no Snapshot', error);
+      return this.getFallbackSnapshot();
     }
+  }
 
-    const sentrySnapshot =
-      sentryResult.status === 'fulfilled'
-        ? sentryResult.value
-        : this.buildSentryError(
-            `Falha ao consultar o Sentry: ${
-              (sentryResult.reason as Error)?.message ??
-              String(sentryResult.reason)
-            }`,
-          );
-
-    if (sentryResult.status === 'rejected') {
-      this.logger.warn(
-        `[AdminHealth] A coleta do Sentry falhou: ${String(
-          sentryResult.reason,
-        )}`,
-      );
-    }
-
-    const elapsedMs = Number((Date.now() - start).toFixed(2));
-    this.logger.debug(`[AdminHealth] snapshot ready in ${elapsedMs} ms`);
-
+  private getFallbackSnapshot(): AdminHealthSnapshot {
+    const memory = process.memoryUsage();
     return {
-      status: 'ok',
+      status: 'degraded',
       timestamp: new Date().toISOString(),
       db: {
-        status: 'up',
-        latencyMs: dbLatencyMs || 0,
+        status: 'down',
+        latencyMs: 0,
       },
-    memory: this.mapMemoryUsage(process.memoryUsage()),
-      activeSessions,
-      insuranceConversion,
-      latencySeries,
-      sentry: sentrySnapshot,
+      memory: {
+        heapUsedMb: Number((memory.heapUsed / 1024 / 1024).toFixed(2)),
+        heapTotalMb: Number((memory.heapTotal / 1024 / 1024).toFixed(2)),
+        rssMb: Number((memory.rss / 1024 / 1024).toFixed(2)),
+      },
+      activeSessions: 0,
+      insuranceConversion: {
+        completedBookings: 0,
+        insuredBookings: 0,
+        insuredRate: 0,
+        breakdown: [],
+      },
+      latencySeries: [],
+      sentry: this.buildSentryError('Snapshot indisponível'),
     };
   }
 
@@ -172,16 +180,6 @@ export class AdminObservabilityService {
     const dbStart = Date.now();
     await this.prisma.$queryRaw`SELECT 1`;
     return Number((Date.now() - dbStart).toFixed(2));
-  }
-
-  private mapMemoryUsage(memory: NodeJS.MemoryUsage): MemoryUsageSnapshot {
-    const toMb = (value: number) =>
-      Number(((value / 1024 / 1024).toFixed(2)));
-    return {
-      heapUsedMb: toMb(memory.heapUsed),
-      heapTotalMb: toMb(memory.heapTotal),
-      rssMb: toMb(memory.rss),
-    };
   }
 
   private async computeInsuranceConversion(): Promise<InsuranceConversionStats> {
