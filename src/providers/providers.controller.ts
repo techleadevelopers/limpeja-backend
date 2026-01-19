@@ -55,6 +55,9 @@ import { SettingsService } from '../settings/settings.service';
 import { ProviderSettingsDto } from './dto/provider-settings.dto';
 import { ProviderPromotionsService } from './provider-promotions.service';
 import { ProviderPromotionsCenterViewDto } from './dto/provider-promotions-center.dto';
+import { ComplianceService } from '../compliance/compliance.service';
+import { ConsentDocumentType } from '../compliance/compliance.constants';
+import { AcceptProviderTermsDto } from './dto/accept-provider-terms.dto';
 
 type RequestWithUser = ExpressRequest & {
   user?: {
@@ -72,6 +75,7 @@ export class ProvidersController {
     private readonly providersService: ProvidersService,
     private readonly settingsService: SettingsService,
     private readonly promotionsService: ProviderPromotionsService,
+    private readonly complianceService: ComplianceService,
   ) {}
 
   // =================================================================================================
@@ -639,6 +643,39 @@ export class ProvidersController {
       15,
     );
     return { serviceRadiusKm };
+  }
+
+  @Post('me/accept-terms')
+  @Roles(UserRole.PROVIDER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Registrar aceite dos termos pelo provedor autenticado',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Consentimento registrado com sucesso.',
+  })
+  async acceptTerms(
+    @Req() req: RequestWithUser,
+    @Body() body: AcceptProviderTermsDto,
+  ) {
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new BadRequestException('Usuário não autenticado.');
+    }
+
+    const consent = await this.complianceService.recordConsent(
+      userId,
+      ConsentDocumentType.TERMS,
+      body.termsVersion,
+      { source: 'provider-app' },
+    );
+
+    return {
+      termsAcceptedAt: consent.consentedAt.toISOString(),
+      termsVersion: consent.version,
+    };
   }
 
   @Get('promotions-center')
