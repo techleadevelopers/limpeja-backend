@@ -45,7 +45,7 @@ interface SentryObservabilityPayload {
     other: number;
   };
   recentIssues: SentryIssueSummary[];
-  statsSeries: Array<{ [key: string]: any }>;
+  projectHealth?: Record<string, any>;
 }
 
 interface SentryObservabilityError {
@@ -293,49 +293,44 @@ export class AdminObservabilityService {
     };
 
     try {
-      const [issuesResponse, sessionsResponse] = await Promise.all([
-        axios.get(`${baseUrl}/organizations/${orgSlug}/issues/`, {
+      const issuesUrl = `${baseUrl}/projects/${orgSlug}/${projectSlug}/issues/`;
+      const projectUrl = `${baseUrl}/projects/${orgSlug}/${projectSlug}/`;
+      const [issuesResponse, projectResponse] = await Promise.all([
+        axios.get(issuesUrl, {
           headers,
           params: {
-            project: projectSlug,
-            statsPeriod: '24h',
             query: 'is:unresolved',
-            per_page: 100,
+            statsPeriod: '24h',
+            per_page: 5,
           },
           timeout: 5000,
         }),
-        axios.get(`${baseUrl}/organizations/${orgSlug}/sessions/`, {
+        axios.get(projectUrl, {
           headers,
-          params: {
-            project: projectSlug,
-            statsPeriod: '24h',
-          },
           timeout: 5000,
         }),
       ]);
 
-      const statsResponse = await axios.get(
-        `${baseUrl}/projects/${orgSlug}/${projectSlug}/stats/`,
-        {
-          headers,
-          params: {
-            field: 'sum(quantity)',
-            stat: 'total',
-            interval: '1h',
-          },
-          timeout: 5000,
-        },
+      console.debug(
+        `[AdminHealth] Sentry issues URL: ${issuesResponse.config?.url}`,
+      );
+      console.debug(
+        `[AdminHealth] Sentry project URL: ${projectResponse.config?.url}`,
       );
 
       const issues = Array.isArray(issuesResponse.data)
         ? issuesResponse.data
         : [];
 
-      const totals = sessionsResponse.data?.totals ?? {};
+      const healthStats =
+        projectResponse.data?.latestRelease ?? projectResponse.data;
+
       const crashFreeSessions =
-        typeof totals.crash_free_sessions === 'number'
-          ? Number(totals.crash_free_sessions)
-          : null;
+        typeof healthStats?.stats?.crash_free_sessions === 'number'
+          ? Number(healthStats.stats.crash_free_sessions)
+          : typeof healthStats?.crash_free_sessions === 'number'
+            ? Number(healthStats.crash_free_sessions)
+            : null;
 
       const byPlatform = {
         android: 0,
@@ -374,9 +369,7 @@ export class AdminObservabilityService {
         crashFreeSessions,
         byPlatform,
         recentIssues,
-        statsSeries: Array.isArray(statsResponse.data)
-          ? statsResponse.data
-          : [],
+        projectHealth: projectResponse.data,
       };
 
       await this.cacheService.set(this.sentryCacheKey, payload, 60);
@@ -385,6 +378,10 @@ export class AdminObservabilityService {
       let statusCode: number | undefined;
       let message = 'Erro desconhecido ao consultar o Sentry';
       if (isAxiosError(error)) {
+        console.error(
+          '[AdminHealth] Sentry request URL (debug):',
+          error.config?.url,
+        );
         statusCode = error.response?.status;
         message =
           error.response?.data?.detail ??
