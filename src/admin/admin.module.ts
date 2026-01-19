@@ -12,6 +12,7 @@ import { AdminPaymentsController } from './admin-payments.controller';
 import { AdminHealthController } from './admin-health.controller';
 import { AdminObservabilityService } from './admin-observability.service';
 import { ObservabilityModule } from '../observability/observability.module';
+import { CacheModule } from '../cache/cache.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ObservabilityModule } from '../observability/observability.module';
     forwardRef(() => PaymentsModule),
     forwardRef(() => BookingsModule),
     ObservabilityModule,
+    CacheModule,
   ],
   controllers: [
     AdminDashboardController,
