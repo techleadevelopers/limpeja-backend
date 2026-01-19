@@ -45,6 +45,7 @@ interface SentryObservabilityPayload {
     other: number;
   };
   recentIssues: SentryIssueSummary[];
+  statsSeries: Array<{ [key: string]: any }>;
 }
 
 interface SentryObservabilityError {
@@ -54,7 +55,9 @@ interface SentryObservabilityError {
   };
 }
 
-type SentryObservabilityResult = SentryObservabilityPayload | SentryObservabilityError;
+type SentryObservabilityResult =
+  | SentryObservabilityPayload
+  | SentryObservabilityError;
 
 interface MemoryUsageSnapshot {
   rssMb: number;
@@ -311,6 +314,19 @@ export class AdminObservabilityService {
         }),
       ]);
 
+      const statsResponse = await axios.get(
+        `${baseUrl}/projects/${orgSlug}/${projectSlug}/stats/`,
+        {
+          headers,
+          params: {
+            field: 'sum(quantity)',
+            stat: 'total',
+            interval: '1h',
+          },
+          timeout: 5000,
+        },
+      );
+
       const issues = Array.isArray(issuesResponse.data)
         ? issuesResponse.data
         : [];
@@ -358,6 +374,9 @@ export class AdminObservabilityService {
         crashFreeSessions,
         byPlatform,
         recentIssues,
+        statsSeries: Array.isArray(statsResponse.data)
+          ? statsResponse.data
+          : [],
       };
 
       await this.cacheService.set(this.sentryCacheKey, payload, 60);
@@ -371,6 +390,12 @@ export class AdminObservabilityService {
           error.response?.data?.detail ??
           error.response?.data?.message ??
           error.message;
+        if (error.response?.data) {
+          console.error(
+            '[AdminHealth] Sentry response body:',
+            error.response.data,
+          );
+        }
       }
       this.logger.warn(
         `[AdminHealth] erro ao consumir API do Sentry: ${message}`,
@@ -382,7 +407,10 @@ export class AdminObservabilityService {
     }
   }
 
-  private buildSentryError(message: string, statusCode?: number): SentryObservabilityError {
+  private buildSentryError(
+    message: string,
+    statusCode?: number,
+  ): SentryObservabilityError {
     return {
       error: {
         message,
