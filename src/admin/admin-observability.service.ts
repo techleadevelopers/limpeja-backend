@@ -63,8 +63,6 @@ interface MemoryUsageSnapshot {
   rssMb: number;
   heapUsedMb: number;
   heapTotalMb: number;
-  externalMb: number;
-  arrayBuffersMb: number;
 }
 
 export interface AdminHealthSnapshot {
@@ -159,9 +157,9 @@ export class AdminObservabilityService {
       timestamp: new Date().toISOString(),
       db: {
         status: 'up',
-        latencyMs: dbLatencyMs,
+        latencyMs: dbLatencyMs || 0,
       },
-      memory: this.mapMemoryUsage(process.memoryUsage()),
+    memory: this.mapMemoryUsage(process.memoryUsage()),
       activeSessions,
       insuranceConversion,
       latencySeries,
@@ -177,14 +175,12 @@ export class AdminObservabilityService {
   }
 
   private mapMemoryUsage(memory: NodeJS.MemoryUsage): MemoryUsageSnapshot {
-    const toMb = (value?: number) =>
-      Number((((value ?? 0) / 1024 / 1024).toFixed(2)));
+    const toMb = (value: number) =>
+      Number(((value / 1024 / 1024).toFixed(2)));
     return {
-      rssMb: toMb(memory.rss),
       heapUsedMb: toMb(memory.heapUsed),
       heapTotalMb: toMb(memory.heapTotal),
-      externalMb: toMb(memory.external),
-      arrayBuffersMb: toMb(memory.arrayBuffers),
+      rssMb: toMb(memory.rss),
     };
   }
 
