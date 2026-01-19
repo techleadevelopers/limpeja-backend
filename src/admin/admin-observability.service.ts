@@ -292,6 +292,17 @@ export class AdminObservabilityService {
       Accept: 'application/json',
     };
 
+    const safeStringify = (value: unknown) => {
+      try {
+        if (value === null || value === undefined) {
+          return String(value);
+        }
+        return JSON.stringify(value, null, 2);
+      } catch {
+        return String(value);
+      }
+    };
+
     try {
       const issuesUrl = `${baseUrl}/projects/${orgSlug}/${projectSlug}/issues/`;
       const projectUrl = `${baseUrl}/projects/${orgSlug}/${projectSlug}/`;
@@ -321,6 +332,11 @@ export class AdminObservabilityService {
       const issues = Array.isArray(issuesResponse.data)
         ? issuesResponse.data
         : [];
+
+      console.debug(
+        '[AdminHealth] Sentry issues payload:',
+        safeStringify(issuesResponse.data),
+      );
 
       const healthStats =
         projectResponse.data?.latestRelease ?? projectResponse.data;
@@ -356,13 +372,24 @@ export class AdminObservabilityService {
           return bDate - aDate;
         })
         .slice(0, 5)
-        .map((issue) => ({
-          id: issue?.id ?? String(Date.now()),
-          title: issue?.title ?? issue?.metadata?.value ?? 'Sem título',
-          platform: issue?.platform ?? 'unknown',
-          lastSeen:
-            issue?.lastSeen ?? issue?.dateCreated ?? new Date().toISOString(),
-        }));
+        .map((issue) => {
+          if (!issue) {
+            console.log('Objeto que causou erro:', safeStringify(issue));
+          }
+          const stackInfo =
+            issue?.entries
+              ?.map((entry: any) => entry?.data?.stacktrace ?? entry)
+              ?.filter(Boolean) || [];
+          const stackTrace = stackInfo.length ? safeStringify(stackInfo) : undefined;
+          return {
+            id: issue?.id ?? String(Date.now()),
+            title: issue?.title ?? issue?.metadata?.value ?? 'Sem título',
+            platform: issue?.platform ?? 'unknown',
+            lastSeen:
+              issue?.lastSeen ?? issue?.dateCreated ?? new Date().toISOString(),
+            stackTrace,
+          };
+        });
 
       const payload: SentryObservabilityPayload = {
         totalUnresolved: issues.length,
@@ -399,6 +426,10 @@ export class AdminObservabilityService {
       );
       console.error(
         `[AdminHealth] Sentry request failed (status=${statusCode ?? 'n/a'}): ${message}`,
+      );
+      console.error(
+        '[AdminHealth] Sentry error full object:',
+        safeStringify(error),
       );
       return this.buildSentryError(message, statusCode);
     }
