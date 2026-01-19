@@ -98,52 +98,56 @@ export class AdminObservabilityService {
     private readonly configService: ConfigService,
   ) {}
 
-  async getSnapshot(): Promise<AdminHealthSnapshot> {
-    const start = Date.now();
-    let dbLatencyMs = 0;
+async getSnapshot(): Promise<AdminHealthSnapshot> {
+  const start = Date.now();
 
-    try {
-      const dbStart = Date.now();
-      await this.prisma.$queryRaw`SELECT 1`;
-      dbLatencyMs = Date.now() - dbStart;
-    } catch (error: any) {
-      this.logger.error(
-        '[AdminHealth] DB health check falhou',
-        error?.message ?? error,
-      );
-      throw new ServiceUnavailableException({
-        status: 'error',
-        message: 'Falha ao conectar com o banco de dados.',
-        reason: error?.message ?? 'unknown',
-      });
-    }
+  // Executa tudo em paralelo para que a latência total 
+  // seja apenas o tempo da tarefa mais lenta (geralmente Sentry)
+  const [
+    dbLatencyMs,
+    activeSessions,
+    latencySeries,
+    insuranceConversion,
+    sentrySnapshot
+  ] = await Promise.all([
+    this.checkDbLatency(),
+    this.estimateActiveSessions(),
+    Promise.resolve(this.observabilityService.getLatencySeries('/search', { windowHours: 6, points: 12 })),
+    this.computeInsuranceConversion(),
+    this.fetchSentrySnapshotWithTimeout(900) // Timeout de 900ms para o Sentry
+  ]);
 
-    const memory = this.mapMemoryUsage(process.memoryUsage());
-    const activeSessions = await this.estimateActiveSessions();
-    const latencySeries = this.observabilityService.getLatencySeries(
-      '/search',
-      {
-        windowHours: 6,
-        points: 12,
-      },
-    );
-    const insuranceConversion = await this.computeInsuranceConversion();
-    const sentrySnapshot = await this.fetchSentrySnapshot();
+  return {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    db: {
+      status: 'up',
+      latencyMs: Number(dbLatencyMs.toFixed(2)),
+    },
+    memory: this.mapMemoryUsage(process.memoryUsage()),
+    activeSessions,
+    insuranceConversion,
+    latencySeries,
+    sentry: sentrySnapshot,
+  };
+}
 
-    return {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      db: {
-        status: 'up',
-        latencyMs: Number(dbLatencyMs.toFixed(2)),
-      },
-      memory,
-      activeSessions,
-      insuranceConversion,
-      latencySeries,
-      sentry: sentrySnapshot,
-    };
-  }
+// Método auxiliar para isolar a latência do DB
+private async checkDbLatency(): Promise<number> {
+  const dbStart = Date.now();
+  await this.prisma.$queryRaw`SELECT 1`;
+  return Date.now() - dbStart;
+}
+
+// Novo método com Timeout para garantir que o Sentry não trave a API
+private async fetchSentrySnapshotWithTimeout(timeoutMs: number): Promise<SentryObservabilityResult> {
+  return Promise.race([
+    this.fetchSentrySnapshot(),
+    new Promise<SentryObservabilityError>((resolve) =>
+      setTimeout(() => resolve(this.buildSentryError('Sentry timeout', 504)), timeoutMs)
+    ),
+  ]);
+}
 
   private mapMemoryUsage(memory: NodeJS.MemoryUsage): MemoryUsageSnapshot {
     const toMb = (value: number) => Number((value / 1024 / 1024).toFixed(2));
