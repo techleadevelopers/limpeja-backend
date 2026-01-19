@@ -8,7 +8,7 @@ import { CacheService } from '../cache/cache.service';
 import { BookingStatus } from '@prisma/client';
 import { ObservabilityService } from '../observability/observability.service';
 import { ConfigService } from '@nestjs/config';
-import axios, { isAxiosError, type AxiosError } from 'axios';
+import axios, { isAxiosError } from 'axios';
 import type { RedisClientType } from '@redis/client';
 
 interface InsuranceBucket {
@@ -98,56 +98,53 @@ export class AdminObservabilityService {
     private readonly configService: ConfigService,
   ) {}
 
-async getSnapshot(): Promise<AdminHealthSnapshot> {
-  const start = Date.now();
+  async getSnapshot(): Promise<AdminHealthSnapshot> {
+    const start = Date.now();
 
-  // Executa tudo em paralelo para que a latência total 
-  // seja apenas o tempo da tarefa mais lenta (geralmente Sentry)
-  const [
-    dbLatencyMs,
-    activeSessions,
-    latencySeries,
-    insuranceConversion,
-    sentrySnapshot
-  ] = await Promise.all([
-    this.checkDbLatency(),
-    this.estimateActiveSessions(),
-    Promise.resolve(this.observabilityService.getLatencySeries('/search', { windowHours: 6, points: 12 })),
-    this.computeInsuranceConversion(),
-    this.fetchSentrySnapshotWithTimeout(900) // Timeout de 900ms para o Sentry
-  ]);
+    // Executa todas as tarefas simultaneamente
+    const [
+      dbLatencyMs,
+      activeSessions,
+      latencySeries,
+      insuranceConversion,
+      sentrySnapshot,
+    ] = await Promise.all([
+      this.checkDbLatency(),
+      this.estimateActiveSessions(),
+      Promise.resolve(
+        this.observabilityService.getLatencySeries('/search', {
+          windowHours: 6,
+          points: 12,
+        }),
+      ),
+      this.computeInsuranceConversion(),
+      this.fetchSentrySnapshot(), // Esta é a chamada que mais demora
+    ]);
 
-  return {
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    db: {
-      status: 'up',
-      latencyMs: Number(dbLatencyMs.toFixed(2)),
-    },
-    memory: this.mapMemoryUsage(process.memoryUsage()),
-    activeSessions,
-    insuranceConversion,
-    latencySeries,
-    sentry: sentrySnapshot,
-  };
-}
+    const elapsedMs = Number((Date.now() - start).toFixed(2));
+    this.logger.debug(`[AdminHealth] snapshot ready in ${elapsedMs} ms`);
 
-// Método auxiliar para isolar a latência do DB
-private async checkDbLatency(): Promise<number> {
-  const dbStart = Date.now();
-  await this.prisma.$queryRaw`SELECT 1`;
-  return Date.now() - dbStart;
-}
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      db: {
+        status: 'up',
+        latencyMs: dbLatencyMs,
+      },
+      memory: this.mapMemoryUsage(process.memoryUsage()),
+      activeSessions,
+      insuranceConversion,
+      latencySeries,
+      sentry: sentrySnapshot,
+    };
+  }
 
-// Novo método com Timeout para garantir que o Sentry não trave a API
-private async fetchSentrySnapshotWithTimeout(timeoutMs: number): Promise<SentryObservabilityResult> {
-  return Promise.race([
-    this.fetchSentrySnapshot(),
-    new Promise<SentryObservabilityError>((resolve) =>
-      setTimeout(() => resolve(this.buildSentryError('Sentry timeout', 504)), timeoutMs)
-    ),
-  ]);
-}
+  // Criar este método auxiliar para medir o DB isoladamente
+  private async checkDbLatency(): Promise<number> {
+    const dbStart = Date.now();
+    await this.prisma.$queryRaw`SELECT 1`;
+    return Number((Date.now() - dbStart).toFixed(2));
+  }
 
   private mapMemoryUsage(memory: NodeJS.MemoryUsage): MemoryUsageSnapshot {
     const toMb = (value: number) => Number((value / 1024 / 1024).toFixed(2));
@@ -216,48 +213,20 @@ private async fetchSentrySnapshotWithTimeout(timeoutMs: number): Promise<SentryO
     }
 
     try {
-      const keyCount = await this.countMatchingKeys(redis);
-      if (keyCount > 0) {
-        return keyCount;
+      // Tenta primeiro contar chaves de sessão (se existirem)
+      const keys = await redis.keys('sess:*'); // Ajustar o prefixo se necessário
+      if (keys.length > 0) {
+        return keys.length;
       }
-    } catch (error) {
-      this.logger.warn(
-        `[AdminHealth] falha ao contar chaves Redis para sessões: ${
-          (error as Error).message ?? error
-        }`,
-      );
-    }
 
-    try {
+      // Se falhar, pega o número de conexões ativas no servidor Redis
       const info = await redis.info('clients');
       const match = info.match(/connected_clients:(\d+)/);
-      if (match) {
-        return Number(match[1]);
-      }
+      return match ? Number(match[1]) : 0;
     } catch (error) {
-      this.logger.warn(
-        `[AdminHealth] falha ao obter info do Redis: ${
-          (error as Error).message ?? error
-        }`,
-      );
+      this.logger.error('Erro ao puxar sessões do Redis', error);
+      return 0;
     }
-
-    return 0;
-  }
-
-  private async countMatchingKeys(client: RedisClientType): Promise<number> {
-    const patterns = ['session:*', 'sess:*', 'ws:*', 'socket:*'];
-    let total = 0;
-    for (const pattern of patterns) {
-      const iterator = client.scanIterator({ MATCH: pattern, COUNT: 100 });
-      for await (const _key of iterator) {
-        total += 1;
-      }
-      if (total > 0) {
-        break;
-      }
-    }
-    return total;
   }
 
   private async fetchSentrySnapshot(): Promise<SentryObservabilityResult> {
