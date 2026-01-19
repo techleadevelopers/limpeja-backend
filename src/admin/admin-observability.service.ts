@@ -8,7 +8,7 @@ import { CacheService } from '../cache/cache.service';
 import { BookingStatus } from '@prisma/client';
 import { ObservabilityService } from '../observability/observability.service';
 import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
+import axios, { isAxiosError, type AxiosError } from 'axios';
 import type { RedisClientType } from '@redis/client';
 
 interface InsuranceBucket {
@@ -47,6 +47,15 @@ interface SentryObservabilityPayload {
   recentIssues: SentryIssueSummary[];
 }
 
+interface SentryObservabilityError {
+  error: {
+    message: string;
+    statusCode?: number;
+  };
+}
+
+type SentryObservabilityResult = SentryObservabilityPayload | SentryObservabilityError;
+
 interface MemoryUsageSnapshot {
   rssMb: number;
   heapUsedMb: number;
@@ -66,7 +75,7 @@ export interface AdminHealthSnapshot {
   activeSessions: number;
   insuranceConversion: InsuranceConversionStats;
   latencySeries: Array<{ timestamp: string; latencyMs: number }>;
-  sentry: SentryObservabilityPayload | null;
+  sentry: SentryObservabilityResult;
 }
 
 @Injectable()
@@ -244,19 +253,31 @@ export class AdminObservabilityService {
     return total;
   }
 
-  private async fetchSentrySnapshot(): Promise<SentryObservabilityPayload | null> {
-    const token = this.configService.get<string>('sentry.apiToken');
-    const orgSlug = this.configService.get<string>('sentry.orgSlug');
-    const projectSlug = this.configService.get<string>('sentry.projectSlug');
+  private async fetchSentrySnapshot(): Promise<SentryObservabilityResult> {
+    const sentryConfig = this.configService.get<{
+      apiToken?: string;
+      orgSlug?: string;
+      projectSlug?: string;
+      apiBaseUrl?: string;
+    }>('sentry');
+    const token = sentryConfig?.apiToken?.trim();
+    const orgSlug = sentryConfig?.orgSlug?.trim();
+    const projectSlug = sentryConfig?.projectSlug?.trim();
     const baseUrl =
-      this.configService.get<string>('sentry.apiBaseUrl') ||
-      'https://sentry.io/api/0';
+      sentryConfig?.apiBaseUrl?.trim() || 'https://sentry.io/api/0';
 
-    if (!token || !orgSlug || !projectSlug) {
-      return null;
+    const missing: string[] = [];
+    if (!token) missing.push('SENTRY_API_TOKEN');
+    if (!orgSlug) missing.push('SENTRY_API_ORG_SLUG');
+    if (!projectSlug) missing.push('SENTRY_API_PROJECT_SLUG');
+
+    if (missing.length > 0) {
+      const message = `Credenciais do Sentry ausentes: ${missing.join(', ')}`;
+      this.logger.warn(`[AdminHealth] ${message}`);
+      return this.buildSentryError(message);
     }
 
-    const cached = await this.cacheService.get<SentryObservabilityPayload>(
+    const cached = await this.cacheService.get<SentryObservabilityResult>(
       this.sentryCacheKey,
     );
     if (cached) {
@@ -341,12 +362,32 @@ export class AdminObservabilityService {
 
       await this.cacheService.set(this.sentryCacheKey, payload, 60);
       return payload;
-    } catch (error: any) {
+    } catch (error) {
+      let statusCode: number | undefined;
+      let message = 'Erro desconhecido ao consultar o Sentry';
+      if (isAxiosError(error)) {
+        statusCode = error.response?.status;
+        message =
+          error.response?.data?.detail ??
+          error.response?.data?.message ??
+          error.message;
+      }
       this.logger.warn(
-        '[AdminHealth] erro ao consumir API do Sentry: ' +
-          (error?.message ?? 'unknown'),
+        `[AdminHealth] erro ao consumir API do Sentry: ${message}`,
       );
-      return null;
+      console.error(
+        `[AdminHealth] Sentry request failed (status=${statusCode ?? 'n/a'}): ${message}`,
+      );
+      return this.buildSentryError(message, statusCode);
     }
+  }
+
+  private buildSentryError(message: string, statusCode?: number): SentryObservabilityError {
+    return {
+      error: {
+        message,
+        statusCode,
+      },
+    };
   }
 }
