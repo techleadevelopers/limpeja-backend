@@ -268,12 +268,11 @@ export class ProvidersController {
         'Latitude, longitude e radius são obrigatórios.',
       );
     }
-    const summary =
-      await this.providersService.getProvidersAvailabilitySummary(
-        safeLat,
-        safeLon,
-        safeRadius,
-      );
+    const summary = await this.providersService.getProvidersAvailabilitySummary(
+      safeLat,
+      safeLon,
+      safeRadius,
+    );
     const dto = new ProviderAvailabilitySummaryDto();
     dto.availableProvidersCount = summary.availableProvidersCount;
     dto.busy = summary.busy;

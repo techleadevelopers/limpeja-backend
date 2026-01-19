@@ -85,8 +85,8 @@ export class DashboardService {
       `[DashboardService] getDashboardData: Agendamentos futuros encontrados: ${upcomingBookingsRaw.length}`,
     );
 
-    const upcomingBookings = upcomingBookingsRaw.map((booking) =>
-      new BookingViewDto(booking, { userRole: UserRole.PROVIDER }),
+    const upcomingBookings = upcomingBookingsRaw.map(
+      (booking) => new BookingViewDto(booking, { userRole: UserRole.PROVIDER }),
     );
 
     this.logger.log(

@@ -139,11 +139,7 @@ export class BookingsController {
     @Body() bookingQuoteRequestDto: BookingQuoteRequestDto,
   ): Promise<BookingQuoteResponseDto> {
     const userId = req.user.userId;
-    return this.bookingsService.quotePrice(
-      userId,
-      bookingQuoteRequestDto,
-      req,
-    );
+    return this.bookingsService.quotePrice(userId, bookingQuoteRequestDto, req);
   }
 
   @Post('schedule-and-pay')
@@ -261,12 +257,12 @@ export class BookingsController {
       (endDate && !Number.isNaN(endDate.getTime()));
     const dateRange = validRange
       ? {
-          start: startDate && !Number.isNaN(startDate.getTime())
-            ? startDate
-            : undefined,
-          end: endDate && !Number.isNaN(endDate.getTime())
-            ? endDate
-            : undefined,
+          start:
+            startDate && !Number.isNaN(startDate.getTime())
+              ? startDate
+              : undefined,
+          end:
+            endDate && !Number.isNaN(endDate.getTime()) ? endDate : undefined,
         }
       : undefined;
     const bookings = await this.bookingsService.findUserBookings(
@@ -395,11 +391,7 @@ export class BookingsController {
   ): Promise<BookingDetailsDto> {
     const userId = req.user.userId;
     const userRole = req.user.role;
-    const booking = await this.bookingsService.acceptBooking(
-      id,
-      userId,
-      req,
-    );
+    const booking = await this.bookingsService.acceptBooking(id, userId, req);
     return new BookingDetailsDto(
       this.bookingsService.withAllowedActions(booking, userRole, userId),
     );
@@ -700,7 +692,9 @@ export class BookingsController {
   @Roles(UserRole.PROVIDER)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Solicitar início manual para um agendamento já confirmado' })
+  @ApiOperation({
+    summary: 'Solicitar início manual para um agendamento já confirmado',
+  })
   @ApiResponse({
     status: 200,
     description: 'Solicitação registrada para o time administrativo.',

@@ -54,10 +54,10 @@ export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
       };
     };
     bookings: {
-      where: { status: 'FINISHED' },
-      select: { id: true }, // <--- MUDE AQUI (tira o take 100 e traga só o ID)
-    },
-   // availability: true, //
+      where: { status: 'FINISHED' };
+      select: { id: true }; // <--- MUDE AQUI (tira o take 100 e traga só o ID)
+    };
+    // availability: true, //
   };
 }> & {
   fiveStarReviewCount?: number;
@@ -329,12 +329,7 @@ export class ProvidersService {
       const lon = provider.address?.longitude;
       if (lat == null || lon == null) return false;
       if (!provider.availability.length) return false;
-      const distance = this.calculateDistanceMeters(
-        safeLat,
-        safeLon,
-        lat,
-        lon,
-      );
+      const distance = this.calculateDistanceMeters(safeLat, safeLon, lat, lon);
       return distance !== undefined && distance <= radiusMeters;
     }).length;
 
@@ -405,9 +400,7 @@ export class ProvidersService {
 
     const averageRating =
       provider.reviewsReceived?.length > 0
-        ? parseFloat(
-            (totalRating / provider.reviewsReceived.length).toFixed(1),
-          )
+        ? parseFloat((totalRating / provider.reviewsReceived.length).toFixed(1))
         : 0;
 
     const completedBookingsCount = provider.bookings?.length ?? 0;
@@ -596,7 +589,7 @@ export class ProvidersService {
           orderBy: { createdAt: 'desc' },
           take: 100,
         },
-       // availability: true, // NOVO: Para nextAvailable
+        // availability: true, // NOVO: Para nextAvailable
       },
     });
 
@@ -623,7 +616,7 @@ export class ProvidersService {
       return provider;
     }
 
- const prismaProvider = await this.prisma.provider.findUnique({
+    const prismaProvider = await this.prisma.provider.findUnique({
       where: { id },
       include: {
         user: {
@@ -674,7 +667,9 @@ export class ProvidersService {
     return null;
   }
 
-  private async resolveMonthlyBookingsCount(providerId: string): Promise<number> {
+  private async resolveMonthlyBookingsCount(
+    providerId: string,
+  ): Promise<number> {
     const cacheKey = `${this.PROVIDERS_CACHE_KEY}:${providerId}:monthlyBookingsCount`;
     const cached = await this.cacheService.get<number>(cacheKey);
     if (typeof cached === 'number') {
@@ -705,7 +700,9 @@ export class ProvidersService {
     return count;
   }
 
-  private async resolveFiveStarReviewCount(providerId: string): Promise<number> {
+  private async resolveFiveStarReviewCount(
+    providerId: string,
+  ): Promise<number> {
     return this.prisma.review.count({
       where: { providerId, rating: 5 },
     });
@@ -757,7 +754,9 @@ export class ProvidersService {
     return rate;
   }
 
-  private async countCompletedBookingsLast30Days(providerId: string): Promise<number> {
+  private async countCompletedBookingsLast30Days(
+    providerId: string,
+  ): Promise<number> {
     const cacheKey = `${this.PROVIDERS_CACHE_KEY}:${providerId}:completedBookingsLast30Days`;
     const cached = await this.cacheService.get<number>(cacheKey);
     if (typeof cached === 'number') {
@@ -791,7 +790,7 @@ export class ProvidersService {
     return Math.round((betaBonus + gammaBonus) * 100) / 100;
   }
 
- private async hydrateProviderExtras(
+  private async hydrateProviderExtras(
     provider: ProviderWithCalculatedRating,
     forceFull = false, // <--- ADICIONE ESTE PARÂMETRO COM DEFAULT FALSE
   ): Promise<void> {
@@ -830,10 +829,11 @@ export class ProvidersService {
       provider.nextAvailable = nextAvailable;
       provider.fiveStarReviewCount = fiveStarReviewCount;
     } catch (error) {
-      this.logger.error(`Erro ao hidratar extras do provedor ${provider.id}: ${error.message}`);
+      this.logger.error(
+        `Erro ao hidratar extras do provedor ${provider.id}: ${error.message}`,
+      );
     }
   }
-
 
   async findByUserId(
     userId: string,
@@ -869,7 +869,7 @@ export class ProvidersService {
         reviewsReceived: {
           include: {
             client: {
-              include: { user: { select: { id: true, avatarUrl: true } } }
+              include: { user: { select: { id: true, avatarUrl: true } } },
             },
           },
         },
@@ -900,7 +900,6 @@ export class ProvidersService {
     );
     return provider;
   }
-
 
   async updateByUserId(
     userId: string,
@@ -1316,7 +1315,7 @@ export class ProvidersService {
 
       try {
         const rawProviders: any[] = await this.prisma.$queryRaw(
-  Prisma.sql`
+          Prisma.sql`
     SELECT 
         p.id, 
         p."userId", 
@@ -1330,8 +1329,8 @@ export class ProvidersService {
       AND ST_DWithin(location, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326), ${radius / 111.32})
     ORDER BY distance ASC
     LIMIT ${limit} OFFSET ${offset}
-  `
-);
+  `,
+        );
 
         if (rawProviders.length === 0) {
           this.logger.warn('Nenhum provedor encontrado na busca geoespacial.');
@@ -1341,75 +1340,79 @@ export class ProvidersService {
         providersWithDistance = await Promise.all(
           rawProviders.map(async (rp: any) => {
             // Mapeamento para ProviderWithIncludes (incluindo novos campos)
-        const toDate = (value: any) => {
-          if (!value) return undefined;
-          const date = new Date(value);
-          return Number.isNaN(date.getTime()) ? undefined : date;
-        };
+            const toDate = (value: any) => {
+              if (!value) return undefined;
+              const date = new Date(value);
+              return Number.isNaN(date.getTime()) ? undefined : date;
+            };
 
-const providerWithIncludes = {
-  ...rp, // Mantém todas as propriedades originais para o frontend não quebrar
-  id: rp.id,
-  userId: rp.userId,
-  fullName: rp.fullName,
-  cpf: rp.cpf,
-  dateOfBirth: toDate(rp.dateOfBirth) ?? null,
-  phone: rp.phone || rp.user_phone || null,
-  yearsOfExperience: rp.yearsOfExperience,
-  avatarUrl: rp.avatarUrl,
-  bio: rp.bio,
-  verificationStatus: rp.verificationStatus,
-  pixKey: rp.pixKey,
-  pixKeyMasked: rp.pixKeyMasked,
-  createdAt: toDate(rp.createdAt) ?? new Date(),
-  updatedAt: toDate(rp.updatedAt) ?? new Date(),
-  documentPhotoFrontUrl: rp.documentPhotoFrontUrl,
-  documentPhotoBackUrl: rp.documentPhotoBackUrl,
-  selfieWithDocumentUrl: rp.selfieWithDocumentUrl,
-  backgroundCheckResult: rp.backgroundCheckResult,
-  rejectionReason: rp.rejectionReason,
-  ocrResult: rp.ocrResult,
-  livenessResult: rp.livenessResult,
-  badges: rp.badges || [],
-  fiveStarReviewCount: rp.fiveStarReviewCount || 0,
-  monthlyBookingsCount: rp.monthlyBookingsCount || 0,
-  acceptanceRate: rp.acceptanceRate || 0,
-  averageResponseTime: rp.averageResponseTime || 0,
-  user: {
-    email: rp.email,
-    role: rp.role,
-    isVerified: rp.isVerified,
-    fullName: rp.user_fullName || rp.fullName,
-    phone: rp.user_phone || rp.phone,
-  },
-  address: rp.addressId ? {
-    id: rp.addressId,
-    cep: rp.cep,
-    street: rp.street,
-    number: rp.number,
-    complement: rp.complement,
-    neighborhood: rp.neighborhood,
-    city: rp.city,
-    state: rp.state,
-    clientId: null,
-    providerId: rp.providerId,
-    latitude: Number(rp.latitude_val) || null,
-    longitude: Number(rp.longitude_val) || null,
-    location: null,
-  } : null,
-  providerServices: rp.providerServicesAgg ? rp.providerServicesAgg.map((ps: any) => ({
-    ...ps,
-    price: new Decimal(ps.price || 0),
-    pricePerHour: new Decimal(ps.pricePerHour || 0),
-    service: ps.service,
-  })) : [],
-  // CAMPOS QUE O TS ESTAVA RECLAMANDO (Obrigatórios no tipo ProviderWithIncludes)
-  reviewsReceived: rp.reviewsReceived || [],
-  bookings: rp.bookings || [],
-  availability: rp.availability || [],
-} as unknown as ProviderWithIncludes; // <-- Isso aqui força o TS a calar a boca
-// Se o TS continuar reclamando, você deve ir no topo do arquivo e 
-// garantir que 'availability' está no 'ProviderWithIncludes'.
+            const providerWithIncludes = {
+              ...rp, // Mantém todas as propriedades originais para o frontend não quebrar
+              id: rp.id,
+              userId: rp.userId,
+              fullName: rp.fullName,
+              cpf: rp.cpf,
+              dateOfBirth: toDate(rp.dateOfBirth) ?? null,
+              phone: rp.phone || rp.user_phone || null,
+              yearsOfExperience: rp.yearsOfExperience,
+              avatarUrl: rp.avatarUrl,
+              bio: rp.bio,
+              verificationStatus: rp.verificationStatus,
+              pixKey: rp.pixKey,
+              pixKeyMasked: rp.pixKeyMasked,
+              createdAt: toDate(rp.createdAt) ?? new Date(),
+              updatedAt: toDate(rp.updatedAt) ?? new Date(),
+              documentPhotoFrontUrl: rp.documentPhotoFrontUrl,
+              documentPhotoBackUrl: rp.documentPhotoBackUrl,
+              selfieWithDocumentUrl: rp.selfieWithDocumentUrl,
+              backgroundCheckResult: rp.backgroundCheckResult,
+              rejectionReason: rp.rejectionReason,
+              ocrResult: rp.ocrResult,
+              livenessResult: rp.livenessResult,
+              badges: rp.badges || [],
+              fiveStarReviewCount: rp.fiveStarReviewCount || 0,
+              monthlyBookingsCount: rp.monthlyBookingsCount || 0,
+              acceptanceRate: rp.acceptanceRate || 0,
+              averageResponseTime: rp.averageResponseTime || 0,
+              user: {
+                email: rp.email,
+                role: rp.role,
+                isVerified: rp.isVerified,
+                fullName: rp.user_fullName || rp.fullName,
+                phone: rp.user_phone || rp.phone,
+              },
+              address: rp.addressId
+                ? {
+                    id: rp.addressId,
+                    cep: rp.cep,
+                    street: rp.street,
+                    number: rp.number,
+                    complement: rp.complement,
+                    neighborhood: rp.neighborhood,
+                    city: rp.city,
+                    state: rp.state,
+                    clientId: null,
+                    providerId: rp.providerId,
+                    latitude: Number(rp.latitude_val) || null,
+                    longitude: Number(rp.longitude_val) || null,
+                    location: null,
+                  }
+                : null,
+              providerServices: rp.providerServicesAgg
+                ? rp.providerServicesAgg.map((ps: any) => ({
+                    ...ps,
+                    price: new Decimal(ps.price || 0),
+                    pricePerHour: new Decimal(ps.pricePerHour || 0),
+                    service: ps.service,
+                  }))
+                : [],
+              // CAMPOS QUE O TS ESTAVA RECLAMANDO (Obrigatórios no tipo ProviderWithIncludes)
+              reviewsReceived: rp.reviewsReceived || [],
+              bookings: rp.bookings || [],
+              availability: rp.availability || [],
+            } as unknown as ProviderWithIncludes; // <-- Isso aqui força o TS a calar a boca
+            // Se o TS continuar reclamando, você deve ir no topo do arquivo e
+            // garantir que 'availability' está no 'ProviderWithIncludes'.
 
             const mappedProvider = this.mapProviderToCalculatedRating(
               providerWithIncludes,
@@ -1483,41 +1486,41 @@ const providerWithIncludes = {
     }
 
     const providers = await this.prisma.provider.findMany({
-  where,
-  take: limit,
-  skip: offset,
-  orderBy: orderBy,
-  include: {
-    user: {
-      select: {
-        email: true,
-        role: true,
-        isVerified: true,
-        fullName: true,
-        phone: true,
-      },
-    },
-    address: true,
-    providerServices: { include: { service: true } },
-    reviewsReceived: {
-      take: 5, // Traga apenas as últimas 5 avaliações, não todas!
+      where,
+      take: limit,
+      skip: offset,
+      orderBy: orderBy,
       include: {
-        client: {
-          include: { user: { select: { id: true, avatarUrl: true } } },
+        user: {
+          select: {
+            email: true,
+            role: true,
+            isVerified: true,
+            fullName: true,
+            phone: true,
+          },
         },
+        address: true,
+        providerServices: { include: { service: true } },
+        reviewsReceived: {
+          take: 5, // Traga apenas as últimas 5 avaliações, não todas!
+          include: {
+            client: {
+              include: { user: { select: { id: true, avatarUrl: true } } },
+            },
+          },
+        },
+        // EM VEZ DE TRAZER 100 BOOKINGS, VAMOS APENAS CONTAR
+        _count: {
+          select: {
+            bookings: { where: { status: 'FINISHED' } },
+            reviewsReceived: true,
+          },
+        },
+        // REMOVEMOS o bookings: { take: 100 } daqui
+        // REMOVEMOS o availability: true daqui (Isso mata a performance da busca)
       },
-    },
-    // EM VEZ DE TRAZER 100 BOOKINGS, VAMOS APENAS CONTAR
-    _count: {
-      select: {
-        bookings: { where: { status: 'FINISHED' } },
-        reviewsReceived: true
-      }
-    }
-    // REMOVEMOS o bookings: { take: 100 } daqui
-    // REMOVEMOS o availability: true daqui (Isso mata a performance da busca)
-  },
-});
+    });
 
     this.logger.log(
       `[ProvidersService] search (fallback): Encontrados ${providers.length} provedores apÃ³s filtro.`,
@@ -1538,9 +1541,9 @@ const providerWithIncludes = {
           }
 
           const mapped = this.mapProviderToCalculatedRating(
-  provider as unknown as ProviderWithIncludes, // AQUI: adicionamos unknown para o erro 2352 sumir
-  distance,
-);
+            provider as unknown as ProviderWithIncludes, // AQUI: adicionamos unknown para o erro 2352 sumir
+            distance,
+          );
           await this.hydrateProviderExtras(mapped);
           return mapped;
         }),
@@ -1823,7 +1826,7 @@ const providerWithIncludes = {
             orderBy: { createdAt: 'desc' },
             take: 100,
           },
-         // availability: true, // NOVO: Para nextAvailable
+          // availability: true, // NOVO: Para nextAvailable
         },
         orderBy: {
           yearsOfExperience: 'desc',
@@ -1927,20 +1930,20 @@ const providerWithIncludes = {
               targetLon,
             );
           }
-        const mapped = this.mapProviderToCalculatedRating(
-          provider as ProviderWithIncludes,
-          distance,
-        );
-        try {
-          await this.hydrateProviderExtras(mapped);
-        } catch (innerErr: any) {
-          this.logger.error(
-            `[ProvidersService] findTopRatedOrExperiencedProviders: falha hidrating extras para ${mapped.id}: ${innerErr?.message || innerErr}`,
+          const mapped = this.mapProviderToCalculatedRating(
+            provider as ProviderWithIncludes,
+            distance,
           );
-        }
-        return mapped;
-      }),
-    );
+          try {
+            await this.hydrateProviderExtras(mapped);
+          } catch (innerErr: any) {
+            this.logger.error(
+              `[ProvidersService] findTopRatedOrExperiencedProviders: falha hidrating extras para ${mapped.id}: ${innerErr?.message || innerErr}`,
+            );
+          }
+          return mapped;
+        }),
+      );
 
     // Filtra pelo raio salvo do provedor (serviceRadiusKm) se cliente forneceu lat/lon
     const radiusFiltered = await this.applyRadiusFilter(
@@ -2160,7 +2163,9 @@ const providerWithIncludes = {
     await this.cacheService.del(
       `${this.PROVIDERS_CACHE_KEY}:top_rated_experienced`,
     );
-    await this.cacheService.del(`${this.PROVIDER_METRICS_CACHE_KEY}:${providerId}`);
+    await this.cacheService.del(
+      `${this.PROVIDER_METRICS_CACHE_KEY}:${providerId}`,
+    );
     // Telemetria: provider_metrics_updated
     this.logger.log(
       `[TELEMETRY] provider_metrics_updated: { providerId: ${providerId}, acceptanceRate: ${acceptanceRate.toFixed(2)}, averageResponseTime: ${averageResponseTime} }`,
@@ -2172,7 +2177,8 @@ const providerWithIncludes = {
     providerId: string,
   ): Promise<ProviderMetrics> {
     const cacheKey = `${this.PROVIDER_METRICS_CACHE_KEY}:${providerId}`;
-    const cachedMetrics = await this.cacheService.get<ProviderMetrics>(cacheKey);
+    const cachedMetrics =
+      await this.cacheService.get<ProviderMetrics>(cacheKey);
     if (cachedMetrics) {
       this.logger.debug(
         `[ProvidersService] getProviderPerformanceMetrics: Cache HIT para ${providerId}.`,

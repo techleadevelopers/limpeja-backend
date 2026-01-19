@@ -66,6 +66,7 @@ import { DisputeModule } from './disputes/dispute.module';
 // NOVOS recursos
 import { LocksModule } from './common/locks/locks.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { ObservabilityModule } from './observability/observability.module';
 import { SupportModule } from './support/support.module';
 import { MetaModule } from './meta/meta.module';
 
@@ -150,6 +151,7 @@ import { ExpireBookingsJob } from './worker/expire-bookings.job';
     AdminModule,
     LocksModule,
     MetricsModule,
+    ObservabilityModule,
     SupportModule,
     MetaModule,
     AnalyticsModule,

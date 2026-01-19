@@ -1,6 +1,7 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Histogram, Counter, register } from 'prom-client';
 import { Request, Response, NextFunction } from 'express';
+import { ObservabilityService } from '../../observability/observability.service';
 
 const HTTP_REQUEST_DURATION_NAME = 'http_request_duration_seconds';
 const HTTP_REQUEST_COUNTER_NAME = 'http_requests_total';
@@ -28,6 +29,8 @@ const httpRequestCounter =
 
 @Injectable()
 export class HttpMetricsMiddleware implements NestMiddleware {
+  constructor(private readonly observabilityService: ObservabilityService) {}
+
   use(req: Request, res: Response, next: NextFunction) {
     const start = process.hrtime.bigint();
 
@@ -48,6 +51,11 @@ export class HttpMetricsMiddleware implements NestMiddleware {
         .labels(method, route, String(statusCode))
         .observe(durationSeconds);
       httpRequestCounter.labels(method, route, String(statusCode)).inc();
+
+      const latencyMs = Number(durationSeconds * 1000);
+      if (route.includes('/search')) {
+        this.observabilityService.recordLatency(route, latencyMs);
+      }
     });
 
     next();

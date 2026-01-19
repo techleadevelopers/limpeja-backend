@@ -129,7 +129,12 @@ async function bootstrap() {
           webhookLogger.debug('[Webhook PIX] raw payload parsed');
         } catch (err) {
           req.body = data;
-          webhookLogger.error('[Webhook PIX] invalid JSON payload, using raw string', typeof err === 'object' && err !== null ? err.toString() : 'unknown error');
+          webhookLogger.error(
+            '[Webhook PIX] invalid JSON payload, using raw string',
+            typeof err === 'object' && err !== null
+              ? err.toString()
+              : 'unknown error',
+          );
         }
 
         return next();
@@ -159,7 +164,12 @@ async function bootstrap() {
           webhookLogger.debug('[Webhook PSP] raw payload parsed');
         } catch (err) {
           req.body = data;
-          webhookLogger.error('[Webhook PSP] invalid JSON payload, using raw string', typeof err === 'object' && err !== null ? err.toString() : 'unknown error');
+          webhookLogger.error(
+            '[Webhook PSP] invalid JSON payload, using raw string',
+            typeof err === 'object' && err !== null
+              ? err.toString()
+              : 'unknown error',
+          );
         }
 
         return next();
@@ -237,6 +247,7 @@ async function bootstrap() {
   //                  TRACING INTERCEPTOR
   // =======================================================
   app.useGlobalInterceptors(app.get(TracingInterceptor));
+
   // =======================================================
   //                    FIREBASE ADMIN
   // =======================================================

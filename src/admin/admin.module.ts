@@ -9,6 +9,9 @@ import { AdminSettingsController } from './admin-settings.controller';
 import { PaymentsModule } from '../payments/payments.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { AdminPaymentsController } from './admin-payments.controller';
+import { AdminHealthController } from './admin-health.controller';
+import { AdminObservabilityService } from './admin-observability.service';
+import { ObservabilityModule } from '../observability/observability.module';
 
 @Module({
   imports: [
@@ -17,13 +20,15 @@ import { AdminPaymentsController } from './admin-payments.controller';
     SettingsModule,
     forwardRef(() => PaymentsModule),
     forwardRef(() => BookingsModule),
+    ObservabilityModule,
   ],
   controllers: [
     AdminDashboardController,
     AdminQueuesController,
     AdminSettingsController,
     AdminPaymentsController,
+    AdminHealthController,
   ],
-  providers: [AdminDashboardService],
+  providers: [AdminDashboardService, AdminObservabilityService],
 })
 export class AdminModule {}
