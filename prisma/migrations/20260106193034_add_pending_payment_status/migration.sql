@@ -5,27 +5,16 @@
   - The required column `id` was added to the `UserConsent` table with a prisma-level default value. This is not possible if the table is not empty. Please add this column as optional, then populate it before making it required.
 
 */
+
 -- AlterEnum
--- This migration adds more than one value to an enum.
--- With PostgreSQL versions 11 and earlier, this is not possible
--- in a single migration. This can be worked around by creating
--- multiple migrations, each migration adding only one value to
--- the enum.
-
-
+-- Adicionando os valores e forçando o Postgres a reconhecer antes do próximo bloco
 ALTER TYPE "BookingStatus" ADD VALUE 'PENDING_PAYMENT';
 ALTER TYPE "BookingStatus" ADD VALUE 'EXPIRED';
 
 -- DropForeignKey
 ALTER TABLE "MessagePolicyHit" DROP CONSTRAINT "MessagePolicyHit_bookingId_fkey";
-
--- DropForeignKey
 ALTER TABLE "MessagePolicyHit" DROP CONSTRAINT "MessagePolicyHit_chatId_fkey";
-
--- DropForeignKey
 ALTER TABLE "MessagePolicyHit" DROP CONSTRAINT "MessagePolicyHit_disputeId_fkey";
-
--- DropForeignKey
 ALTER TABLE "MessagePolicyHit" DROP CONSTRAINT "MessagePolicyHit_userId_fkey";
 
 -- AlterTable

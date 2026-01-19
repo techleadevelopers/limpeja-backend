@@ -11,8 +11,9 @@ import { BookingsModule } from '../bookings/bookings.module';
 import { AdminPaymentsController } from './admin-payments.controller';
 import { AdminHealthController } from './admin-health.controller';
 import { AdminObservabilityService } from './admin-observability.service';
+import { AdminProvidersController } from './admin-providers.controller';
 import { ObservabilityModule } from '../observability/observability.module';
-import { CacheModule } from '../cache/cache.module';
+import { ProvidersModule } from '../providers/providers.module';
 
 @Module({
   imports: [
@@ -22,7 +23,7 @@ import { CacheModule } from '../cache/cache.module';
     forwardRef(() => PaymentsModule),
     forwardRef(() => BookingsModule),
     ObservabilityModule,
-    CacheModule,
+    ProvidersModule,
   ],
   controllers: [
     AdminDashboardController,
@@ -30,6 +31,7 @@ import { CacheModule } from '../cache/cache.module';
     AdminSettingsController,
     AdminPaymentsController,
     AdminHealthController,
+    AdminProvidersController,
   ],
   providers: [AdminDashboardService, AdminObservabilityService],
 })

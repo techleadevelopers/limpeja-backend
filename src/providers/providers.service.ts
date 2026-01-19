@@ -9,15 +9,16 @@ import {
 } from '@nestjs/common';
 import {
   Address,
-  PricingType,
+  BookingStatus,
+  Offer as PrismaOffer,
+  OfferTarget,
   Prisma,
+  PricingType,
   ProviderService,
+  ProviderVisibilityStatus,
   Service,
   VerificationStatus,
   UserRole,
-  BookingStatus,
-  Offer as PrismaOffer, // IMPORTANTE: Importe o tipo Offer do Prisma aqui
-  OfferTarget, // NOVO: Importe OfferTarget
 } from '@prisma/client';
 import { File } from 'multer';
 import { CacheService } from '../cache/cache.service';
@@ -122,6 +123,9 @@ export type ProviderWithCalculatedRating = {
   phone: string | null;
   bio: string | null;
   verificationStatus?: VerificationStatus; // NOVO: Opcional para selo
+  visibilityStatus?: ProviderVisibilityStatus;
+  visibilityReason?: string | null;
+  visibilityUpdatedAt?: string | null;
   address: Address | null;
   providerServices: ProviderServiceForFrontend[];
   averageRating: number;
@@ -388,6 +392,12 @@ export class ProvidersService {
     return undefined;
   }
 
+  private async invalidateProviderCache(providerId: string, userId: string) {
+    await this.cacheService.del(this.PROVIDERS_CACHE_KEY);
+    await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:${providerId}`);
+    await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:user:${userId}`);
+  }
+
   public mapProviderToCalculatedRating(
     provider: ProviderWithIncludes,
     distance?: number,
@@ -425,7 +435,10 @@ export class ProvidersService {
       phone: provider.phone || provider.user?.phone || null,
       userPhone: provider.user?.phone || null,
       bio: provider.bio || null,
-      verificationStatus: provider.verificationStatus, // NOVO: IncluÃ­do para selo
+      verificationStatus: provider.verificationStatus,
+      visibilityStatus: provider.visibilityStatus ?? ProviderVisibilityStatus.VISIBLE,
+      visibilityReason: provider.visibilityReason ?? null,
+      visibilityUpdatedAt: provider.visibilityUpdatedAt ? provider.visibilityUpdatedAt.toISOString() : null,
       address: provider.address ?? null,
       providerServices: provider.providerServices.map((ps) => ({
         id: ps.id,
@@ -519,18 +532,31 @@ export class ProvidersService {
         `[ProvidersService] updateAvatar: Imagem enviada para GCS. URL: ${fileUrl}`,
       );
 
+      const updateData: Prisma.ProviderUpdateInput = {
+        avatarUrl: fileUrl,
+      };
+      let visibilityTransitioned = false;
+      if (provider.visibilityStatus === ProviderVisibilityStatus.VITRINE_IRREGULAR) {
+        updateData.visibilityStatus = ProviderVisibilityStatus.PENDING_VITRINE_REVIEW;
+        updateData.visibilityReason = null;
+        updateData.visibilityUpdatedAt = new Date();
+        visibilityTransitioned = true;
+      }
+
       await this.prisma.provider.update({
         where: { userId },
-        data: { avatarUrl: fileUrl },
+        data: updateData,
       });
 
-      // Invalida o cache de provedores apÃ³s a atualizaÃ§Ã£o
-      await this.cacheService.del(this.PROVIDERS_CACHE_KEY);
-      await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:${provider.id}`);
-      await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:user:${userId}`);
+      await this.invalidateProviderCache(provider.id, userId);
       this.logger.log(
         `[ProvidersService] updateAvatar: Cache de provedores invalidado.`,
       );
+      if (visibilityTransitioned) {
+        this.logger.log(
+          `[ProvidersService] updateAvatar: Vitrine irregular movida para PENDING_VITRINE_REVIEW para provider ${provider.id}.`,
+        );
+      }
 
       this.logger.log(
         `[ProvidersService] updateAvatar: AvatarUrl no banco de dados atualizado com sucesso para userId ${userId}.`,
@@ -549,7 +575,101 @@ export class ProvidersService {
       );
     }
   }
-  // --- FIM DA NOVA FUNÃÃO ---
+  async getVisibilityForUser(
+    userId: string,
+  ): Promise<
+    | {
+        visibilityStatus: ProviderVisibilityStatus;
+        visibilityReason: string | null;
+        visibilityUpdatedAt: Date | null;
+      }
+    | null
+  > {
+    const provider = await this.prisma.provider.findUnique({
+      where: { userId },
+      select: {
+        visibilityStatus: true,
+        visibilityReason: true,
+        visibilityUpdatedAt: true,
+      },
+    });
+    if (!provider) return null;
+    return {
+      visibilityStatus:
+        provider.visibilityStatus ?? ProviderVisibilityStatus.VISIBLE,
+      visibilityReason: provider.visibilityReason ?? null,
+      visibilityUpdatedAt: provider.visibilityUpdatedAt ?? null,
+    };
+  }
+
+  async setProviderVisibility(
+    providerId: string,
+    visibilityStatus: ProviderVisibilityStatus,
+    visibilityReason?: string | null,
+    adminId?: string,
+  ): Promise<ProviderWithCalculatedRating> {
+    const provider = await this.prisma.provider.findUnique({
+      where: { id: providerId },
+    });
+    if (!provider) {
+      this.logger.warn(
+        `[ProvidersService] setProviderVisibility: Provedor ${providerId} nao encontrado.`,
+      );
+      throw new NotFoundException(`Provedor com ID \"${providerId}\" nao encontrado.`);
+    }
+
+    const normalizedReason =
+      visibilityStatus === ProviderVisibilityStatus.VISIBLE
+        ? null
+        : visibilityReason?.trim() || null;
+
+    const updatedProvider = await this.prisma.provider.update({
+      where: { id: providerId },
+      data: {
+        visibilityStatus,
+        visibilityReason: normalizedReason,
+        visibilityUpdatedAt: new Date(),
+      },
+      include: {
+        user: {
+          select: {
+            email: true,
+            role: true,
+            isVerified: true,
+            fullName: true,
+            phone: true,
+          },
+        },
+        address: true,
+        providerServices: { include: { service: true } },
+        reviewsReceived: {
+          include: {
+            client: {
+              include: { user: { select: { id: true, avatarUrl: true } } },
+            },
+          },
+        },
+        bookings: {
+          where: { status: 'FINISHED' },
+          orderBy: { createdAt: 'desc' },
+          take: 100,
+        },
+      },
+    });
+
+    await this.invalidateProviderCache(updatedProvider.id, updatedProvider.userId);
+    const mapped = this.mapProviderToCalculatedRating(
+      updatedProvider as ProviderWithIncludes,
+    );
+    await this.hydrateProviderExtras(mapped);
+    this.logger.log(
+      `[ProvidersService] setProviderVisibility: status=${visibilityStatus} for provider=${providerId} reason=${normalizedReason ?? 'n/a'} by admin=${adminId ?? 'unknown'}`,
+    );
+    this.logger.log(
+      `[TELEMETRY] provider_visibility_changed: { providerId: ${providerId}, adminId: ${adminId ?? 'system'}, status: ${visibilityStatus}, reason: ${normalizedReason ?? 'none'} }`,
+    );
+    return mapped;
+  }
 
   async getPendingProviders(): Promise<ProviderWithCalculatedRating[]> {
     this.logger.log(
@@ -1259,6 +1379,7 @@ export class ProvidersService {
 
     const where: Prisma.ProviderWhereInput = {
       verificationStatus: VerificationStatus.APPROVED,
+      visibilityStatus: ProviderVisibilityStatus.VISIBLE,
     };
 
     if (searchTerm) {
@@ -1321,11 +1442,16 @@ export class ProvidersService {
         p."userId", 
         p."fullName", 
       p."avatarUrl", 
+      p."verificationStatus",
+      p."visibilityStatus",
+      p."visibilityReason",
+      p."visibilityUpdatedAt",
       ST_Distance(location, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)) * 111.32 AS distance
     FROM "Provider" p
     JOIN "User" u ON p."userId" = u.id
     WHERE u.status = 'ACTIVE'
       AND p."verificationStatus" = 'APPROVED'
+      AND p."visibilityStatus" = 'VISIBLE'
       AND ST_DWithin(location, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326), ${radius / 111.32})
     ORDER BY distance ASC
     LIMIT ${limit} OFFSET ${offset}
@@ -1358,6 +1484,9 @@ export class ProvidersService {
               avatarUrl: rp.avatarUrl,
               bio: rp.bio,
               verificationStatus: rp.verificationStatus,
+              visibilityStatus: rp.visibilityStatus,
+              visibilityReason: rp.visibilityReason,
+              visibilityUpdatedAt: toDate(rp.visibilityUpdatedAt) ?? null,
               pixKey: rp.pixKey,
               pixKeyMasked: rp.pixKeyMasked,
               createdAt: toDate(rp.createdAt) ?? new Date(),
@@ -1665,6 +1794,9 @@ export class ProvidersService {
           p."dateOfBirth",
           p."avatarUrl",
           p."verificationStatus",
+          p."visibilityStatus",
+          p."visibilityReason",
+          p."visibilityUpdatedAt",
           p."pixKey",
           p."createdAt",
           p."updatedAt",
@@ -1751,8 +1883,9 @@ export class ProvidersService {
             "Review" r ON p.id = r."providerId"
         WHERE
             p."verificationStatus"::text = ${Prisma.raw(`'${VerificationStatus.APPROVED}'`)}
+            AND p."visibilityStatus"::text = ${Prisma.raw(`'${ProviderVisibilityStatus.VISIBLE}'`)}
         GROUP BY
-            p.id, u.email, u.role, u."isVerified", u."fullName", u."phone", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus"
+            p.id, u.email, u.role, u."isVerified", u."fullName", u."phone", a.id, a.cep, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a."providerId", a.location, p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges, p."acceptanceRate", p."averageResponseTime", p."verificationStatus", p."visibilityStatus", p."visibilityReason", p."visibilityUpdatedAt"
         ORDER BY
             p."yearsOfExperience" DESC,  -- Ordena principal por experiÃªncia (como original)
             distance_m ASC  -- SecundÃ¡rio por distÃ¢ncia se lat/lng fornecidos
@@ -1764,7 +1897,10 @@ export class ProvidersService {
           `[ProvidersService] findTopRatedOrExperiencedProviders: Falha no cÃ¡lculo de distÃ¢ncia (PostGIS indisponÃ­vel?). Caindo para consulta padrÃ£o. Erro: ${err?.message || err}`,
         );
         providers = await this.prisma.provider.findMany({
-          where: { verificationStatus: VerificationStatus.APPROVED },
+          where: {
+            verificationStatus: VerificationStatus.APPROVED,
+            visibilityStatus: ProviderVisibilityStatus.VISIBLE,
+          },
           include: {
             user: {
               select: {

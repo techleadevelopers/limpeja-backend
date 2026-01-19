@@ -23,6 +23,7 @@ import { UpdateProviderProfileDto } from './dto/update-provider-profile.dto';
 import { ProviderDetailsDto } from './dto/provider-details.dto';
 import { ProviderSearchDto } from './dto/provider-search.dto';
 import { ProviderViewDto } from './dto/provider-view.dto';
+import { ProviderVisibilityDto } from './dto/provider-visibility.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -400,6 +401,42 @@ export class ProvidersController {
     );
     // NOVO: Inclui novos campos opcionais no mapeamento
     return new ProviderDetailsDto(provider);
+  }
+
+  @Get('me/visibility')
+  @Roles(UserRole.PROVIDER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Obter o status de visibilidade da vitrine do provedor logado',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Status de visibilidade do provedor.',
+    type: ProviderVisibilityDto,
+  })
+  @ApiResponse({ status: 401, description: 'NALo autorizado.' })
+  @ApiResponse({ status: 404, description: 'Provedor nALo encontrado.' })
+  async getMyVisibility(
+    @Req() req: RequestWithUser,
+  ): Promise<ProviderVisibilityDto> {
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new NotFoundException('Dados de usuA!rio nALo encontrados no token.');
+    }
+    const visibility = await this.providersService.getVisibilityForUser(userId);
+    if (!visibility) {
+      throw new NotFoundException(
+        `Visibilidade do provedor com User ID "${userId}" nALo encontrada.`,
+      );
+    }
+    return new ProviderVisibilityDto({
+      visibilityStatus: visibility.visibilityStatus,
+      visibilityReason: visibility.visibilityReason,
+      visibilityUpdatedAt: visibility.visibilityUpdatedAt
+        ? visibility.visibilityUpdatedAt.toISOString()
+        : null,
+    });
   }
 
   @Patch('me')

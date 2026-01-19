@@ -36,6 +36,12 @@ enum VerificationStatus {
   BLOCKED
 }
 
+enum ProviderVisibilityStatus {
+  VISIBLE
+  VITRINE_IRREGULAR
+  PENDING_VITRINE_REVIEW
+}
+
 enum PricingType {
   FIXED_PRICE
   HOURLY
@@ -448,6 +454,9 @@ model Provider {
   yearsOfExperience       Int?
   avatarUrl               String?
   verificationStatus      VerificationStatus  @default(PENDING_INITIAL_REVIEW)
+  visibilityStatus        ProviderVisibilityStatus @default(VISIBLE)
+  visibilityReason        String?
+  visibilityUpdatedAt     DateTime?
 
   // Documentos e verificação
   cpf                     String?             @unique
@@ -778,13 +787,11 @@ model NotificationLog {
 }
 
 model WhatsappWebhookLog {
-  id            String   @id @default(uuid())
-  messageId     String?
-  phone         String?
-  text          String?
-  status        String?
-  payload       Json?
-  createdAt     DateTime @default(now())
+  id         String   @id @default(uuid())
+  event      String
+  instanceId String
+  data       Json
+  createdAt  DateTime @default(now())
 }
 
 model Review {
