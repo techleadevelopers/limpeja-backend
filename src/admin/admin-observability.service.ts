@@ -121,7 +121,7 @@ export class AdminObservabilityService {
           breakdown: [],
         })),
         Promise.resolve(
-          this.observabilityService.getLatencySeries('/search', {
+          this.observabilityService.getLatencySeries('/api/search', {
             windowHours: 6,
             points: 12,
           }),
