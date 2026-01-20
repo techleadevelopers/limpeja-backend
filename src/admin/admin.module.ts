@@ -12,9 +12,11 @@ import { AdminPaymentsController } from './admin-payments.controller';
 import { AdminHealthController } from './admin-health.controller';
 import { AdminObservabilityService } from './admin-observability.service';
 import { AdminProvidersController } from './admin-providers.controller';
+import { LiveStatusController } from './live-status.controller';
 import { CacheModule } from '../cache/cache.module';
 import { ObservabilityModule } from '../observability/observability.module';
 import { ProvidersModule } from '../providers/providers.module';
+import { LiveStatusService } from './live-status.service';
 
 @Module({
   imports: [
@@ -34,7 +36,8 @@ import { ProvidersModule } from '../providers/providers.module';
     AdminPaymentsController,
     AdminHealthController,
     AdminProvidersController,
+    LiveStatusController,
   ],
-  providers: [AdminDashboardService, AdminObservabilityService],
+  providers: [AdminDashboardService, AdminObservabilityService, LiveStatusService],
 })
 export class AdminModule {}

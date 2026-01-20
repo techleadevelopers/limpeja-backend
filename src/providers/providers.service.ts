@@ -1,4 +1,5 @@
 // src/providers/providers.service.ts
+import { createHash } from 'crypto';
 import {
   BadRequestException,
   forwardRef,
@@ -165,6 +166,22 @@ export type ProviderWithCalculatedRating = {
   nextAvailable?: { date: string; time: string };
 };
 
+export interface AdminProviderPageParams {
+  page?: number;
+  limit?: number;
+  searchTerm?: string;
+  serviceId?: string;
+  category?: string;
+  verificationStatus?: VerificationStatus;
+}
+
+export interface AdminProvidersPageResult {
+  items: ProviderWithCalculatedRating[];
+  totalCount: number;
+  page: number;
+  limit: number;
+}
+
 // NEW: Backend type for ProviderMetrics to match frontend
 export interface ProviderMetrics {
   acceptanceRate: number;
@@ -181,6 +198,7 @@ export class ProvidersService {
   private readonly MONTHLY_BOOKINGS_COUNT_CACHE_TTL_SECONDS = 5 * 60;
   private readonly RANKING_METRICS_CACHE_TTL_SECONDS = 5 * 60;
   private readonly PUBLIC_PROVIDERS_CACHE_TTL_SECONDS = 60;
+  private readonly SEARCH_RESULTS_CACHE_TTL_SECONDS = 5 * 60;
 
   constructor(
     private prisma: PrismaService,
@@ -190,6 +208,41 @@ export class ProvidersService {
     @Inject(forwardRef(() => AvailabilityService))
     private readonly availabilityService: AvailabilityService,
   ) {}
+
+  private buildSearchCacheKey(searchDto: ProviderSearchDto): string {
+    const normalizeString = (value?: string | null): string | null =>
+      value?.trim().toLowerCase() ?? null;
+
+    const normalized = {
+      searchTerm: normalizeString(searchDto.searchTerm),
+      serviceId: searchDto.serviceId ?? null,
+      location: normalizeString(searchDto.location),
+      minRating: searchDto.minRating ?? null,
+      latitude:
+        typeof searchDto.latitude === 'number'
+          ? Number(searchDto.latitude)
+          : null,
+      longitude:
+        typeof searchDto.longitude === 'number'
+          ? Number(searchDto.longitude)
+          : null,
+      radius:
+        typeof searchDto.radius === 'number'
+          ? Number(searchDto.radius)
+          : null,
+      city: normalizeString(searchDto.city),
+      state: normalizeString(searchDto.state),
+      sortBy: searchDto.sortBy ?? null,
+      limit: searchDto.limit ?? 20,
+      offset: searchDto.offset ?? 0,
+    };
+
+    const hash = createHash('md5')
+      .update(JSON.stringify(normalized))
+      .digest('hex');
+
+    return `${this.PROVIDERS_CACHE_KEY}:search:${hash}`;
+  }
 
   private buildAddressString(address?: Partial<Address>): string | null {
     if (!address) return null;
@@ -719,6 +772,99 @@ export class ProvidersService {
         return this.mapProviderToCalculatedRating(p as ProviderWithIncludes);
       }),
     );
+  }
+
+  async getAdminProvidersPage(
+    params: AdminProviderPageParams,
+  ): Promise<AdminProvidersPageResult> {
+    const page = Math.max(1, params.page ?? 1);
+    const limit = Math.min(Math.max(1, params.limit ?? 9), 50);
+    const skip = (page - 1) * limit;
+    const searchTerm = params.searchTerm?.trim();
+
+    this.logger.log(
+      `[ProvidersService] getAdminProvidersPage: page=${page} limit=${limit} search=${searchTerm ?? 'n/a'} status=${params.verificationStatus ?? 'any'}`,
+    );
+
+    const where: Prisma.ProviderWhereInput = {};
+
+    if (searchTerm) {
+      where.OR = [
+        { fullName: { contains: searchTerm, mode: 'insensitive' } },
+        { user: { email: { contains: searchTerm, mode: 'insensitive' } } },
+        { bio: { contains: searchTerm, mode: 'insensitive' } },
+        {
+          providerServices: {
+            some: {
+              service: { name: { contains: searchTerm, mode: 'insensitive' } },
+            },
+          },
+        },
+      ];
+    }
+
+    if (params.verificationStatus) {
+      where.verificationStatus = params.verificationStatus;
+    }
+
+    const providerServiceFilter: Prisma.ProviderServiceWhereInput = {};
+    if (params.serviceId) {
+      providerServiceFilter.serviceId = params.serviceId;
+    }
+    const categoryFilter = params.category?.trim();
+    if (categoryFilter) {
+      providerServiceFilter.service = {
+        name: { contains: categoryFilter, mode: 'insensitive' },
+      };
+    }
+    if (Object.keys(providerServiceFilter).length) {
+      where.providerServices = { some: providerServiceFilter };
+    }
+
+    const [totalCount, providers] = await Promise.all([
+      this.prisma.provider.count({ where }),
+      this.prisma.provider.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              email: true,
+              role: true,
+              isVerified: true,
+              fullName: true,
+              phone: true,
+            },
+          },
+          address: true,
+          providerServices: { include: { service: true } },
+          reviewsReceived: {
+            include: {
+              client: {
+                include: { user: { select: { id: true, avatarUrl: true } } },
+              },
+            },
+          },
+          bookings: {
+            where: { status: 'FINISHED' },
+            select: { id: true },
+          },
+        },
+      }),
+    ]);
+
+    const mapped = providers.map((provider) =>
+      this.mapProviderToCalculatedRating(provider as ProviderWithIncludes),
+    );
+
+    return {
+      items: mapped,
+      totalCount,
+      page,
+      limit,
+    };
   }
 
   async findOne(id: string): Promise<ProviderWithCalculatedRating | null> {
@@ -1367,7 +1513,7 @@ export class ProvidersService {
       state,
     } = searchDto;
 
-    const cacheKey = `${this.PROVIDERS_CACHE_KEY}:search:${JSON.stringify(searchDto)}`;
+    const cacheKey = this.buildSearchCacheKey(searchDto);
     const cachedResult =
       await this.cacheService.get<ProviderWithCalculatedRating[]>(cacheKey);
     if (cachedResult) {
@@ -1597,11 +1743,11 @@ export class ProvidersService {
           (a, b) => (a.distance || Infinity) - (b.distance || Infinity),
         );
       }
-      await this.cacheService.set(
-        cacheKey,
-        providersWithDistance,
-        this.PUBLIC_PROVIDERS_CACHE_TTL_SECONDS,
-      );
+    await this.cacheService.set(
+      cacheKey,
+      providersWithDistance,
+      this.SEARCH_RESULTS_CACHE_TTL_SECONDS,
+    );
       this.logger.log(
         `[ProvidersService] search: Resultados da busca complexa adicionados ao cache.`,
       );
@@ -1723,7 +1869,7 @@ export class ProvidersService {
     await this.cacheService.set(
       cacheKey,
       filteredProviders,
-      this.PUBLIC_PROVIDERS_CACHE_TTL_SECONDS,
+      this.SEARCH_RESULTS_CACHE_TTL_SECONDS,
     );
     this.logger.log(
       `[ProvidersService] search: Resultados da busca complexa (fallback) adicionados ao cache.`,

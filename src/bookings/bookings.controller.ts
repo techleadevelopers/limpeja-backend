@@ -14,7 +14,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { BookingsService } from './bookings.service';
+import { BookingsService, AdminBookingPage } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { BookingDetailsDto } from './dto/booking-details.dto';
@@ -68,14 +68,47 @@ export class BookingsController {
   @ApiOperation({ summary: 'Listar todos os agendamentos (apenas admin)' })
   @ApiResponse({
     status: 200,
-    description: 'Lista de agendamentos.',
-    type: [BookingDetailsDto],
+    description:
+      'Lista de agendamentos. Inclua `paginated=1` para receber cursor pagination, contadores e nextCursor.',
   })
   async findAllBookings(
     @Req() req: RequestWithUser,
     @Query('status') status?: BookingStatus,
-  ): Promise<BookingDetailsDto[]> {
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('paginated') paginated?: string,
+  ): Promise<BookingDetailsDto[] | AdminBookingPage> {
     const { userId, role } = req.user;
+    const shouldPaginate = Boolean(
+      paginated &&
+        ['1', 'true', 'yes'].includes(paginated.toLowerCase()),
+    );
+
+    if (shouldPaginate) {
+      const limitNumber =
+        typeof limit !== 'undefined' && !Number.isNaN(Number(limit))
+          ? Number(limit)
+          : undefined;
+      const parseDate = (value?: string) => {
+        if (!value) return undefined;
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? undefined : date;
+      };
+
+      const page = await this.bookingsService.findAdminBookingsPage({
+        cursor,
+        take: limitNumber,
+        status,
+        search: search?.trim(),
+        startDate: parseDate(startDate),
+        endDate: parseDate(endDate),
+      });
+      return page;
+    }
+
     const bookings = await this.bookingsService.findUserBookings(
       userId,
       role,

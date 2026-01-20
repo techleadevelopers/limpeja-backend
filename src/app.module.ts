@@ -69,6 +69,7 @@ import { MetricsModule } from './metrics/metrics.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { SupportModule } from './support/support.module';
 import { MetaModule } from './meta/meta.module';
+import { TelemetryModule } from './telemetry/telemetry.module';
 
 // Admin
 import { AdminModule } from './admin/admin.module';
@@ -152,6 +153,7 @@ import { ExpireBookingsJob } from './worker/expire-bookings.job';
     LocksModule,
     MetricsModule,
     ObservabilityModule,
+    TelemetryModule,
     SupportModule,
     MetaModule,
     AnalyticsModule,

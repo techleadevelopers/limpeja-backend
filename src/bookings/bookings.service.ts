@@ -1,4 +1,11 @@
-﻿import dayjs from 'dayjs';
+import dayjsModule = require('dayjs');
+const dayjs: typeof import('dayjs') =
+  (
+    (dayjsModule as typeof import('dayjs') & {
+      default?: typeof import('dayjs');
+    }).default ?? dayjsModule
+  ) as typeof import('dayjs');
+
 import {
   Injectable,
   NotFoundException,
@@ -23,6 +30,7 @@ import {
   Booking,
   BookingStatus,
   PaymentIntentStatus,
+  PricingType,
   ProviderService,
   UserRole,
   Prisma,
@@ -77,6 +85,117 @@ import { ReferralsService } from '../referrals/referrals.service';
 import { I18nService } from '../common/i18n/i18n.service';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { Request } from 'express';
+
+const ADMIN_BOOKING_LIST_SELECT = {
+  id: true,
+  clientId: true,
+  providerId: true,
+  providerServiceId: true,
+  status: true,
+  scheduledDate: true,
+  scheduledTime: true,
+  totalPrice: true,
+  createdAt: true,
+  updatedAt: true,
+  client: {
+    select: {
+      id: true,
+      fullName: true,
+      user: {
+        select: {
+          fullName: true,
+        },
+      },
+    },
+  },
+  provider: {
+    select: {
+      id: true,
+      fullName: true,
+      user: {
+        select: {
+          fullName: true,
+        },
+      },
+    },
+  },
+  providerService: {
+    select: {
+      id: true,
+      service: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          icon: true,
+          defaultPricingType: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingSelect;
+
+type AdminBookingListRow = Prisma.BookingGetPayload<{
+  select: typeof ADMIN_BOOKING_LIST_SELECT;
+}>;
+
+export interface StatusCounts {
+  pending: number;
+  confirmed: number;
+  completed: number;
+  canceled: number;
+}
+
+export interface AdminBookingListItemDto {
+  id: string;
+  clientId: string;
+  providerId: string;
+  providerServiceId: string;
+  status: BookingStatus;
+  scheduledDate: Date;
+  scheduledTime?: string | null;
+  totalPrice: number;
+  createdAt: Date;
+  updatedAt: Date;
+  clientFullName?: string | null;
+  providerFullName?: string | null;
+  client?: {
+    id: string;
+    fullName?: string | null;
+  };
+  provider?: {
+    id: string;
+    fullName?: string | null;
+  };
+  service?: {
+    id: string;
+    name: string;
+    description?: string | null;
+    icon?: string | null;
+    defaultPricingType?: PricingType | null;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+}
+
+export interface AdminBookingPage {
+  items: AdminBookingListItemDto[];
+  totalCount: number;
+  nextCursor?: string;
+  statusCounts: StatusCounts;
+}
+
+const decimalToNumber = (value?: Prisma.Decimal | number | null): number => {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+  if (typeof value === 'number') {
+    return value;
+  }
+  return Number(value.toNumber());
+};
 
 import { RedisLockService } from '../common/locks/redis-lock.service';
 import { CacheService } from '../cache/cache.service';
@@ -1988,6 +2107,194 @@ export class BookingsService {
         }),
       );
     }
+  }
+
+  async findAdminBookingsPage(options?: {
+    cursor?: string;
+    take?: number;
+    status?: BookingStatus;
+    search?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<AdminBookingPage> {
+    const take = Math.min(Math.max(options?.take ?? 20, 5), 50);
+    const where: Prisma.BookingWhereInput = {};
+    if (options?.status) {
+      where.status = options.status;
+    }
+
+    if (options?.startDate || options?.endDate) {
+      const scheduledFilter: Prisma.DateTimeFilter = {};
+      if (options.startDate) {
+        scheduledFilter.gte = options.startDate;
+      }
+      if (options.endDate) {
+        scheduledFilter.lte = options.endDate;
+      }
+      where.scheduledDate = scheduledFilter;
+    }
+
+    const normalizedSearch = options?.search?.trim();
+    if (normalizedSearch) {
+      const searchClause: Prisma.BookingWhereInput = {
+        OR: [
+          { id: { contains: normalizedSearch, mode: 'insensitive' } },
+          {
+            client: {
+              is: {
+                OR: [
+                  { fullName: { contains: normalizedSearch, mode: 'insensitive' } },
+                  {
+                    user: {
+                      is: {
+                        fullName: { contains: normalizedSearch, mode: 'insensitive' },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            provider: {
+              is: {
+                OR: [
+                  { fullName: { contains: normalizedSearch, mode: 'insensitive' } },
+                  {
+                    user: {
+                      is: {
+                        fullName: { contains: normalizedSearch, mode: 'insensitive' },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      };
+      const currentAnd = Array.isArray(where.AND)
+        ? where.AND
+        : where.AND
+        ? [where.AND]
+        : [];
+      where.AND = [...currentAnd, searchClause];
+    }
+
+    const queryArgs: Prisma.BookingFindManyArgs = {
+      where,
+      select: ADMIN_BOOKING_LIST_SELECT,
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take,
+    };
+
+    if (options?.cursor) {
+      queryArgs.cursor = { id: options.cursor };
+      queryArgs.skip = 1;
+    }
+
+    const bookingsPromise = this.prisma.booking.findMany(
+      queryArgs,
+    ) as unknown as Promise<AdminBookingListRow[]>;
+
+    const [bookings, totalCount, statusGroups] = await Promise.all([
+      bookingsPromise,
+      this.prisma.booking.count({ where }),
+      this.prisma.booking.groupBy({
+        by: ['status'],
+        _count: {
+          _all: true,
+        },
+        where,
+      }),
+    ]);
+
+    const statusTotals = statusGroups.reduce<Record<BookingStatus, number>>(
+      (acc, entry) => {
+        acc[entry.status] = entry._count._all;
+        return acc;
+      },
+      {} as Record<BookingStatus, number>,
+    );
+    const getCount = (statuses: BookingStatus[]) =>
+      statuses.reduce((sum, status) => sum + (statusTotals[status] ?? 0), 0);
+    const pendingStatuses = [
+      BookingStatus.PENDING,
+      BookingStatus.PENDING_PROVIDER_CONFIRMATION,
+    ];
+    const confirmedStatuses = [BookingStatus.CONFIRMED, BookingStatus.STARTED];
+    const completedStatuses = [BookingStatus.FINISHED];
+    const canceledStatuses = [
+      BookingStatus.CANCELED,
+      BookingStatus.REJECTED,
+      BookingStatus.NO_SHOW,
+    ];
+
+    const items = bookings.map((booking) => {
+      const clientName =
+        booking.client?.user?.fullName ?? booking.client?.fullName ?? null;
+      const providerName =
+        booking.provider?.user?.fullName ?? booking.provider?.fullName ?? null;
+      const service =
+        booking.providerService?.service && booking.providerService.service;
+      const scheduledTimeLabel = booking.scheduledTime
+        ? formatScheduledTime(booking.scheduledTime)
+        : null;
+      return {
+        id: booking.id,
+        clientId: booking.clientId,
+        providerId: booking.providerId,
+        providerServiceId: booking.providerServiceId,
+        status: booking.status,
+        scheduledDate: booking.scheduledDate,
+        scheduledTime: scheduledTimeLabel,
+        totalPrice: decimalToNumber(booking.totalPrice),
+        createdAt: booking.createdAt,
+        updatedAt: booking.updatedAt,
+        clientFullName: clientName,
+        providerFullName: providerName,
+        client: booking.client
+          ? {
+              id: booking.client.id,
+              fullName: clientName ?? undefined,
+            }
+          : undefined,
+        provider: booking.provider
+          ? {
+              id: booking.provider.id,
+              fullName: providerName ?? undefined,
+            }
+          : undefined,
+        service: service
+          ? {
+              id: service.id,
+              name: service.name,
+              description: service.description,
+              icon: service.icon,
+              defaultPricingType: service.defaultPricingType,
+              createdAt: service.createdAt,
+              updatedAt: service.updatedAt,
+            }
+          : undefined,
+      };
+    });
+
+    const nextCursor =
+      bookings.length === take ? bookings[bookings.length - 1].id : undefined;
+
+    return {
+      items,
+      totalCount,
+      nextCursor,
+      statusCounts: {
+        pending: getCount(pendingStatuses),
+        confirmed: getCount(confirmedStatuses),
+        completed: getCount(completedStatuses),
+        canceled: getCount(canceledStatuses),
+      },
+    };
   }
 
   async findUserBookings(
