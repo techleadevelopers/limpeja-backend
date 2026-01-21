@@ -10,29 +10,48 @@ export class AuditInterceptor implements NestInterceptor {
   constructor(private readonly auditLogService: AuditLogService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    const request = context.switchToHttp().getRequest();
+    const http = context.switchToHttp();
+    const request = http.getRequest();
+    const response = http.getResponse();
     const { method, url, user, body, ip } = request;
     const userAgent = request.get('user-agent');
 
-    // Só logamos mutações (ignora GET)
-    const isMutation = ['POST', 'PATCH', 'DELETE', 'PUT'].includes(method);
+    const hasUserId = Boolean(user?.userId);
 
     return next.handle().pipe(
       tap({
         next: (data) => {
-          if (isMutation && user?.userId) {
-            // Sanitização básica: remove campos sensíveis do log
-            const sanitizedBody = { ...body };
-            delete sanitizedBody.password;
-            delete sanitizedBody.token;
+          if (!hasUserId) {
+            return;
+          }
 
-            this.auditLogService.log(
+          const sanitizedRequest = {
+            method,
+            path: url,
+            params: request.params ?? {},
+            query: request.query ?? {},
+            body: (() => {
+              if (!body) return null;
+              const copy = { ...body };
+              delete copy.password;
+              delete copy.token;
+              return Object.keys(copy).length ? copy : null;
+            })(),
+          };
+
+          const responsePreview =
+            method === 'GET'
+              ? { statusCode: response?.statusCode ?? 0 }
+              : { statusCode: response?.statusCode ?? 0, body: data };
+
+          this.auditLogService
+            .log(
               user.userId,
               `${method} ${url}`,
-              { request: sanitizedBody, response: data },
-              { ip, userAgent }
-            ).catch(err => this.logger.error('Failed to save audit log', err));
-          }
+              { request: sanitizedRequest, response: responsePreview },
+              { ip, userAgent },
+            )
+            .catch((err) => this.logger.error('Failed to save audit log', err));
         },
       }),
     );
