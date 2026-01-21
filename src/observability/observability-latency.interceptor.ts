@@ -8,16 +8,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Observable } from 'rxjs';
 import { finalize } from 'rxjs/operators';
-import { normalizeRouteKey } from './route-normalizer';
+import { CRITICAL_ROUTE_PREFIXES } from './latency-route-config';
 import { ObservabilityService } from './observability.service';
-
-const CRITICAL_ROUTE_PREFIXES = [
-  '/api/bookings',
-  '/api/payments',
-  '/api/payouts',
-  '/api/auth',
-  '/api/safety',
-];
+import { normalizeRouteKey } from './route-normalizer';
 
 const MIN_SAMPLE_RATE = 0.01;
 
@@ -37,7 +30,7 @@ export class ObservabilityLatencyInterceptor implements NestInterceptor {
     );
     this.defaultRate = this.clampRate(
       this.configService.get<number>('observability.latency.sampleRateDefault'),
-      0.1,
+      1,
     );
     this.criticalRate = this.clampRate(
       this.configService.get<number>('observability.latency.sampleRateCritical'),
