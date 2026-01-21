@@ -1,11 +1,11 @@
 // Shared configuration for routes we want to treat as critical/high visibility.
 const CRITICAL_ROUTES = [
-  '/search',
-  '/bookings',
-  '/payments',
-  '/payouts',
-  '/auth',
-  '/safety',
+  'api/search',
+  'api/bookings',
+  'api/payments',
+  'api/payouts',
+  'api/auth',
+  'api/safety',
 ];
 
 // Exposed list for sampling prefixes in the interceptor.
