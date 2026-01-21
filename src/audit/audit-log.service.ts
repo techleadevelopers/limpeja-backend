@@ -22,7 +22,6 @@ export class AuditLogService {
       },
     });
   }
-
   async findAll(limit = 50) {
     return this.prisma.auditLog.findMany({
       take: limit,
