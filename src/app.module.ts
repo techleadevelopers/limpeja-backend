@@ -77,6 +77,7 @@ import { AuditLogModule } from './audit/audit-log.module';
 // Queues
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './audit/audit.interceptor';
+import { ObservabilityLatencyInterceptor } from './observability/observability-latency.interceptor';
 import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
 import { HttpMetricsMiddleware } from './common/middleware/http-metrics.middleware';
 import { ConfigController } from './config/config.controller';
@@ -176,6 +177,10 @@ import { ExpireBookingsJob } from './worker/expire-bookings.job';
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ObservabilityLatencyInterceptor,
     },
   ],
 })
