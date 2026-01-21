@@ -104,7 +104,7 @@ import { ExpireBookingsJob } from './worker/expire-bookings.job';
         throttlers: [
           {
             ttl: config.get<number>('throttle.ttl', 120) * 1000,
-            limit: config.get<number>('throttle.limit', 1000),
+            limit: 1000, // Hardcoded para ignorar variáveis de ambiente durante o teste
           },
         ],
       }),

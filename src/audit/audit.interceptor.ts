@@ -20,17 +20,27 @@ export class AuditInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap({
-        next: (data) => this.logAction(user, method, url, request, response, data, ip, userAgent),
-        error: (error) => {
-          const status = error instanceof HttpException ? error.getStatus() : 500;
-          this.logAction(user, method, url, request, { statusCode: status }, error.response || error.message, ip, userAgent);
+        next: (data) => {
+          if (response.statusCode >= 400) return; // Evita duplicar se o erro já for tratado
+          this.logAction(context, data);
         },
+        error: (err) => this.logAction(context, err),
       }),
     );
   }
 
-  private logAction(user: any, method: string, url: string, request: any, response: any, data: any, ip: string, userAgent: string) {
-    if (!user?.userId) return;
+  private logAction(context: ExecutionContext, dataOrError: any) {
+    const request = context.switchToHttp().getRequest();
+    const response = context.switchToHttp().getResponse();
+    const { method, url, user, body, ip } = request;
+    const userAgent = request.get('user-agent');
+    
+    if (!user?.userId) return; 
+
+    const isError = dataOrError instanceof Error;
+    const statusCode = isError 
+      ? (dataOrError instanceof HttpException ? dataOrError.getStatus() : 500)
+      : (response?.statusCode ?? 200);
 
     const sanitizedRequest = {
       method,
@@ -38,7 +48,6 @@ export class AuditInterceptor implements NestInterceptor {
       params: request.params ?? {},
       query: request.query ?? {},
       body: (() => {
-        const body = request.body;
         if (!body) return null;
         const copy = { ...body };
         delete copy.password;
@@ -47,10 +56,10 @@ export class AuditInterceptor implements NestInterceptor {
       })(),
     };
 
-    const responsePreview =
-      method === 'GET' && response?.statusCode < 400
-        ? { statusCode: response?.statusCode ?? 0 }
-        : { statusCode: response?.statusCode ?? 0, body: data };
+    const responsePreview = {
+      statusCode,
+      body: isError ? (dataOrError as any).response : (method === 'GET' ? undefined : dataOrError),
+    };
 
     this.auditLogService
       .log(
