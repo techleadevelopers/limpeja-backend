@@ -73,6 +73,7 @@ import { TelemetryModule } from './telemetry/telemetry.module';
 
 // Admin
 import { AdminModule } from './admin/admin.module';
+import { AuditLogModule } from './audit/audit-log.module';
 
 // Queues
 import { QueuesModule } from './queues/queues.module';
@@ -80,7 +81,8 @@ import { HealthModule } from './health/health.module';
 import { HttpMetricsMiddleware } from './common/middleware/http-metrics.middleware';
 import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
 import { ConfigController } from './config/config.controller';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { AuditInterceptor } from './audit/audit.interceptor';
 import { ExpireBookingsJob } from './worker/expire-bookings.job';
 
 @Module({
@@ -150,6 +152,7 @@ import { ExpireBookingsJob } from './worker/expire-bookings.job';
     MissionsModule,
     DisputeModule,
     AdminModule,
+    AuditLogModule,
     LocksModule,
     MetricsModule,
     ObservabilityModule,
@@ -170,6 +173,10 @@ import { ExpireBookingsJob } from './worker/expire-bookings.job';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor,
     },
   ],
 })

@@ -32,7 +32,7 @@ export class HttpMetricsMiddleware implements NestMiddleware {
   constructor(private readonly observabilityService: ObservabilityService) {}
 
   private isCriticalRoute(route: string): boolean {
-    return ['bookings', 'payments', 'auth', 'search', 'providers'].some((segment) =>
+    return ['bookings', 'payments', 'auth', 'search', 'providers', 'safety', 'chat', 'verification', 'payouts', 'subscriptions', 'webhooks', 'notifications', 'disputes', 'reviews', 'admin'].some((segment) =>
       route.startsWith(`/${segment}`),
     );
   }
@@ -85,9 +85,6 @@ export class HttpMetricsMiddleware implements NestMiddleware {
   private recordLatency(routeKey: string, durationMs: number) {
     if (durationMs <= 0) {
       return;
-    }
-    if (this.shouldSample(routeKey)) {
-      this.observabilityService.recordLatency(routeKey, durationMs);
     }
   }
 
