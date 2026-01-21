@@ -1,6 +1,6 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
-import { Histogram, Counter, register } from 'prom-client';
-import { Request, Response, NextFunction } from 'express';
+import { NextFunction, Request, Response } from 'express';
+import { Counter, Histogram, register } from 'prom-client';
 import { ObservabilityService } from '../../observability/observability.service';
 
 const HTTP_REQUEST_DURATION_NAME = 'http_request_duration_seconds';
@@ -32,7 +32,7 @@ export class HttpMetricsMiddleware implements NestMiddleware {
   constructor(private readonly observabilityService: ObservabilityService) {}
 
   private isCriticalRoute(route: string): boolean {
-    return ['bookings', 'payments', 'auth'].some((segment) =>
+    return ['bookings', 'payments', 'auth', 'search', 'providers'].some((segment) =>
       route.startsWith(`/${segment}`),
     );
   }
