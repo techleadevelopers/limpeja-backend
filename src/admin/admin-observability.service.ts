@@ -123,7 +123,7 @@ export class AdminObservabilityService {
         })),
         Promise.resolve(
           this.observabilityService.getLatencySeries(
-            normalizeRouteKey(routeKey ?? '/api/search'),
+            normalizeRouteKey(routeKey ?? '/search'),
             {
               windowHours: 6,
               points: 12,
