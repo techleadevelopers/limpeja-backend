@@ -359,13 +359,11 @@ export class AdminObservabilityService {
           : typeof healthStats?.crash_free_sessions === 'number'
             ? Number(healthStats.crash_free_sessions)
             : null;
-
       const byPlatform = {
         android: 0,
         ios: 0,
         other: 0,
       };
-
       for (const issue of issues) {
         const platform = (issue?.platform ?? 'other').toLowerCase();
         if (platform.includes('android')) {
