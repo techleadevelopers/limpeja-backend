@@ -33,7 +33,9 @@ export class ObservabilityLatencyInterceptor implements NestInterceptor {
       1,
     );
     this.criticalRate = this.clampRate(
-      this.configService.get<number>('observability.latency.sampleRateCritical'),
+      this.configService.get<number>(
+        'observability.latency.sampleRateCritical',
+      ),
       1,
     );
   }
@@ -93,7 +95,8 @@ export class ObservabilityLatencyInterceptor implements NestInterceptor {
       return normalizeRouteKey(pathCandidate);
     }
 
-    const original = (request.originalUrl as string | undefined) ??
+    const original =
+      (request.originalUrl as string | undefined) ??
       (request.url as string | undefined);
     return normalizeRouteKey(original);
   }

@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
 import { BookingStatus } from '@prisma/client';
@@ -359,11 +356,13 @@ export class AdminObservabilityService {
           : typeof healthStats?.crash_free_sessions === 'number'
             ? Number(healthStats.crash_free_sessions)
             : null;
+
       const byPlatform = {
         android: 0,
         ios: 0,
         other: 0,
       };
+
       for (const issue of issues) {
         const platform = (issue?.platform ?? 'other').toLowerCase();
         if (platform.includes('android')) {
@@ -390,7 +389,9 @@ export class AdminObservabilityService {
             issue?.entries
               ?.map((entry: any) => entry?.data?.stacktrace ?? entry)
               ?.filter(Boolean) || [];
-          const stackTrace = stackInfo.length ? safeStringify(stackInfo) : undefined;
+          const stackTrace = stackInfo.length
+            ? safeStringify(stackInfo)
+            : undefined;
           return {
             id: issue?.id ?? String(Date.now()),
             title: issue?.title ?? issue?.metadata?.value ?? 'Sem título',

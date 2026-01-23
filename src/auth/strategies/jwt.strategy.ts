@@ -34,6 +34,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
+  private readonly safeCacheTtlSeconds = 300;
+
   async validate(payload: {
     sub: string;
     email: string;
@@ -52,10 +54,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       });
     }
 
-    const forceLogoutFlag = await this.cacheService.get<boolean>(
-      this.buildForceLogoutKey(payload.sub),
+    const forceLogoutKey = this.buildForceLogoutKey(payload.sub);
+    const forceLogoutFlag = await this.cacheService.get<true | 'safe'>(
+      forceLogoutKey,
     );
-    if (forceLogoutFlag) {
+    if (forceLogoutFlag === true) {
       this.logger.warn(
         `[JwtStrategy] validate: ${payload.sub} bloqueado por logout forçado`,
       );
@@ -63,6 +66,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         message: 'Sessão encerrada por medidas administrativas.',
         code: AuthErrorCode.TOKEN_REVOKED,
       });
+    }
+
+    if (forceLogoutFlag === undefined) {
+      await this.cacheService.set(
+        forceLogoutKey,
+        'safe',
+        this.safeCacheTtlSeconds,
+      );
     }
 
     let user:

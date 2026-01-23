@@ -129,7 +129,7 @@ export class ProviderDetailsDto {
   @IsOptional()
   @IsEnum(ProviderVisibilityStatus)
   visibilityStatus?: ProviderVisibilityStatus;
-  
+
   @ApiPropertyOptional({
     description: 'Motivo registrado para a restricao de visibilidade',
     example: 'Selfie informal',
@@ -137,7 +137,7 @@ export class ProviderDetailsDto {
   @IsOptional()
   @IsString()
   visibilityReason?: string | null;
-  
+
   @ApiPropertyOptional({
     description: 'Data e hora da ultima atualizacao do status de visibilidade',
     example: '2025-01-01T12:00:00.000Z',

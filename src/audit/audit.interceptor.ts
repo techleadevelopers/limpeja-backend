@@ -1,4 +1,11 @@
-import { CallHandler, ExecutionContext, HttpException, Injectable, Logger, NestInterceptor } from '@nestjs/common';
+import {
+  CallHandler,
+  ExecutionContext,
+  HttpException,
+  Injectable,
+  Logger,
+  NestInterceptor,
+} from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { AuditLogService } from './audit-log.service';
@@ -10,13 +17,8 @@ export class AuditInterceptor implements NestInterceptor {
   constructor(private readonly auditLogService: AuditLogService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    const http = context.switchToHttp();
-    const request = http.getRequest();
-    const response = http.getResponse();
-    const { method, url, user, body, ip } = request;
-    const userAgent = request.get('user-agent');
-
-    const hasUserId = Boolean(user?.userId);
+    const response = context.switchToHttp().getResponse();
+    const request = context.switchToHttp().getRequest();
 
     return next.handle().pipe(
       tap({
@@ -34,12 +36,14 @@ export class AuditInterceptor implements NestInterceptor {
     const response = context.switchToHttp().getResponse();
     const { method, url, user, body, ip } = request;
     const userAgent = request.get('user-agent');
-    
-    if (!user?.userId) return; 
+
+    if (!user?.userId) return; // Mantém a exigência rigorosa do token
 
     const isError = dataOrError instanceof Error;
-    const statusCode = isError 
-      ? (dataOrError instanceof HttpException ? dataOrError.getStatus() : 500)
+    const statusCode = isError
+      ? dataOrError instanceof HttpException
+        ? dataOrError.getStatus()
+        : 500
       : (response?.statusCode ?? 200);
 
     const sanitizedRequest = {
@@ -58,7 +62,11 @@ export class AuditInterceptor implements NestInterceptor {
 
     const responsePreview = {
       statusCode,
-      body: isError ? (dataOrError as any).response : (method === 'GET' ? undefined : dataOrError),
+      body: isError
+        ? (dataOrError as any).response
+        : method === 'GET'
+          ? undefined
+          : dataOrError,
     };
 
     this.auditLogService

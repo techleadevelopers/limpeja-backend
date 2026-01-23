@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CacheService } from '../cache/cache.service';
-import type { RedisClientType } from '@redis/client';
 import { TelemetryEventsService } from './telemetry.events.service';
 import { TelemetryAnomalyPayload } from './telemetry.types';
 
@@ -16,7 +15,10 @@ export class TelemetryService {
     private readonly events: TelemetryEventsService,
   ) {}
 
-  async recordRequest(userId: string | undefined, rawPath: string): Promise<void> {
+  async recordRequest(
+    userId: string | undefined,
+    rawPath: string,
+  ): Promise<void> {
     if (!userId || !rawPath) {
       return;
     }
@@ -81,6 +83,7 @@ export class TelemetryService {
     }
 
     const key = this.buildForceLogoutKey(userId);
+    await this.cacheService.del(key);
     await this.cacheService.set(key, true, ttlSeconds);
     this.logger.warn(
       `[TelemetryService] markForceLogout: usuário ${userId} bloqueado automaticamente por ${ttlSeconds}s`,

@@ -76,6 +76,7 @@ export class UpdateVerificationStatusDto {
 }
 
 @ApiTags('verification')
+@ApiBearerAuth()
 @Controller('verification')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class VerificationController {

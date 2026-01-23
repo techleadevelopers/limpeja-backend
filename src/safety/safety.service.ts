@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { ReportPanicDto } from './dto/report-panic.dto';
 import { ReportIncidentDto } from './dto/report-incident.dto';
 import { UpdateIncidentDto } from './dto/update-incident.dto';
+import { UpdatePanicLocationDto } from './dto/update-panic-location.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
@@ -204,5 +205,27 @@ export class SafetyService {
     if (!alert)
       throw new NotFoundException(`PanicAlert with ID ${id} not found.`);
     return this.prisma.panicAlert.update({ where: { id }, data: { status } });
+  }
+
+  async updatePanicLocation(
+    panicId: string,
+    userId: string,
+    coords: UpdatePanicLocationDto,
+  ) {
+    const alert = await this.prisma.panicAlert.findUnique({
+      where: { id: panicId },
+    });
+    if (!alert || alert.userId !== userId) {
+      throw new NotFoundException(
+        'Alerta de pânico não encontrado para o usuário atual.',
+      );
+    }
+    return this.prisma.panicAlert.update({
+      where: { id: panicId },
+      data: {
+        latitude: new Decimal(coords.latitude),
+        longitude: new Decimal(coords.longitude),
+      },
+    });
   }
 }

@@ -4,7 +4,7 @@ import {
   Module,
   NestModule,
 } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config'; // mantém
+import { ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -77,22 +77,17 @@ import { AuditLogModule } from './audit/audit-log.module';
 // Queues
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AuditInterceptor } from './audit/audit.interceptor';
-import { ObservabilityLatencyInterceptor } from './observability/observability-latency.interceptor';
 import { TracingInterceptor } from './common/interceptors/tracing.interceptor';
 import { HttpMetricsMiddleware } from './common/middleware/http-metrics.middleware';
 import { ConfigController } from './config/config.controller';
 import { HealthModule } from './health/health.module';
 import { QueuesModule } from './queues/queues.module';
+import { CleanupDeletedUserNotificationsJob } from './worker/cleanup-deleted-user-notifications.job';
 import { ExpireBookingsJob } from './worker/expire-bookings.job';
 
 @Module({
   imports: [
-    // 🔥 CORREÇÃO DEFINITIVA: carrega o .env aqui
-    ConfigModule.forRoot({
-      isGlobal: true,
-    }),
-
-    // mantém o módulo customizado
+    // O CustomConfigModule já carrega e valida as variáveis de ambiente.
     CustomConfigModule,
 
     // Scheduler global (necessário para @Cron)
@@ -168,6 +163,7 @@ import { ExpireBookingsJob } from './worker/expire-bookings.job';
   controllers: [AppController, ConfigController],
   providers: [
     AppService,
+    CleanupDeletedUserNotificationsJob,
     ExpireBookingsJob,
     TracingInterceptor,
     {
@@ -177,10 +173,6 @@ import { ExpireBookingsJob } from './worker/expire-bookings.job';
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
-    },
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: ObservabilityLatencyInterceptor,
     },
   ],
 })

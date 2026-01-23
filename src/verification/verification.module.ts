@@ -9,6 +9,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { QueuesModule } from '../queues/queues.module';
 import { NotificationsModule } from '../notifications/notifications.module'; // Importar NotificationsModule
+import { CacheModule } from '../cache/cache.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { NotificationsModule } from '../notifications/notifications.module'; // 
     forwardRef(() => QueuesModule),
     NotificationsModule, // Adicionar NotificationsModule aqui
     UploadModule,
+    CacheModule,
   ],
   controllers: [VerificationController],
   providers: [VerificationService, DocumentProcessingService],

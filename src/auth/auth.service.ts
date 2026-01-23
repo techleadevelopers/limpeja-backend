@@ -1,29 +1,29 @@
 // src/auth/auth.service.ts
 import {
-    BadRequestException,
-    ConflictException,
-    forwardRef,
-    Inject,
-    Injectable,
-    Logger,
-    NotFoundException,
-    UnauthorizedException
+  BadRequestException,
+  ConflictException,
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
-    BookingStatus,
-    Prisma,
-    User,
-    UserRole,
-    VerificationStatus
+  BookingStatus,
+  Prisma,
+  User,
+  UserRole,
+  VerificationStatus,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { EmailService } from '../common/services/email.service';
 import { GeocodingService } from '../common/services/geocoding.service';
 import {
-    ConsentDocumentType,
-    DEFAULT_CONSENT_VERSIONS,
+  ConsentDocumentType,
+  DEFAULT_CONSENT_VERSIONS,
 } from '../compliance/compliance.constants';
 import { ComplianceService } from '../compliance/compliance.service';
 import { PrismaService } from '../prisma/prisma.service';

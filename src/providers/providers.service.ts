@@ -71,7 +71,7 @@ export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
 type ProviderForBadgeUpdate = Prisma.ProviderGetPayload<{
   include: {
     user: { select: { isVerified: true } };
-    bookings: { where: { status: 'FINISHED' } }; // â CORRIGIDO
+    bookings: { where: { status: 'FINISHED' } };
     reviewsReceived: { where: { rating: { gte: 4 } } };
   };
 }>;
@@ -199,6 +199,8 @@ export class ProvidersService {
   private readonly RANKING_METRICS_CACHE_TTL_SECONDS = 5 * 60;
   private readonly PUBLIC_PROVIDERS_CACHE_TTL_SECONDS = 60;
   private readonly SEARCH_RESULTS_CACHE_TTL_SECONDS = 5 * 60;
+  private readonly DEFAULT_SEARCH_CACHE_KEY = `${this.PROVIDERS_CACHE_KEY}:search`;
+  private defaultSearchWarmUpPromise: Promise<void> | null = null;
 
   constructor(
     private prisma: PrismaService,
@@ -227,9 +229,7 @@ export class ProvidersService {
           ? Number(searchDto.longitude)
           : null,
       radius:
-        typeof searchDto.radius === 'number'
-          ? Number(searchDto.radius)
-          : null,
+        typeof searchDto.radius === 'number' ? Number(searchDto.radius) : null,
       city: normalizeString(searchDto.city),
       state: normalizeString(searchDto.state),
       sortBy: searchDto.sortBy ?? null,
@@ -242,6 +242,22 @@ export class ProvidersService {
       .digest('hex');
 
     return `${this.PROVIDERS_CACHE_KEY}:search:${hash}`;
+  }
+
+  private isDefaultSearchDto(searchDto: ProviderSearchDto): boolean {
+    const normalize = (value?: string | null): string => value?.trim() ?? '';
+    return (
+      !normalize(searchDto.searchTerm) &&
+      !searchDto.serviceId &&
+      !normalize(searchDto.location) &&
+      searchDto.minRating == null &&
+      searchDto.latitude === undefined &&
+      searchDto.longitude === undefined &&
+      searchDto.radius === undefined &&
+      !normalize(searchDto.city) &&
+      !normalize(searchDto.state) &&
+      !searchDto.sortBy
+    );
   }
 
   private buildAddressString(address?: Partial<Address>): string | null {
@@ -451,6 +467,33 @@ export class ProvidersService {
     await this.cacheService.del(`${this.PROVIDERS_CACHE_KEY}:user:${userId}`);
   }
 
+  private async warmUpDefaultSearchCache(): Promise<void> {
+    if (this.defaultSearchWarmUpPromise) {
+      return this.defaultSearchWarmUpPromise;
+    }
+    this.defaultSearchWarmUpPromise = (async () => {
+      try {
+        this.logger.log(
+          '[ProvidersService] warmUpDefaultSearchCache: pré-aquecendo cache da busca padrão.',
+        );
+        await this.search({});
+      } catch (error) {
+        this.logger.error(
+          `[ProvidersService] warmUpDefaultSearchCache: falha ao pré-aquecer cache padrão: ${
+            (error as Error)?.message ?? error
+          }`,
+        );
+      } finally {
+        this.defaultSearchWarmUpPromise = null;
+      }
+    })();
+    return this.defaultSearchWarmUpPromise;
+  }
+
+  public async refreshDefaultSearchCache(): Promise<void> {
+    await this.warmUpDefaultSearchCache();
+  }
+
   public mapProviderToCalculatedRating(
     provider: ProviderWithIncludes,
     distance?: number,
@@ -489,9 +532,12 @@ export class ProvidersService {
       userPhone: provider.user?.phone || null,
       bio: provider.bio || null,
       verificationStatus: provider.verificationStatus,
-      visibilityStatus: provider.visibilityStatus ?? ProviderVisibilityStatus.VISIBLE,
+      visibilityStatus:
+        provider.visibilityStatus ?? ProviderVisibilityStatus.VISIBLE,
       visibilityReason: provider.visibilityReason ?? null,
-      visibilityUpdatedAt: provider.visibilityUpdatedAt ? provider.visibilityUpdatedAt.toISOString() : null,
+      visibilityUpdatedAt: provider.visibilityUpdatedAt
+        ? provider.visibilityUpdatedAt.toISOString()
+        : null,
       address: provider.address ?? null,
       providerServices: provider.providerServices.map((ps) => ({
         id: ps.id,
@@ -589,8 +635,11 @@ export class ProvidersService {
         avatarUrl: fileUrl,
       };
       let visibilityTransitioned = false;
-      if (provider.visibilityStatus === ProviderVisibilityStatus.VITRINE_IRREGULAR) {
-        updateData.visibilityStatus = ProviderVisibilityStatus.PENDING_VITRINE_REVIEW;
+      if (
+        provider.visibilityStatus === ProviderVisibilityStatus.VITRINE_IRREGULAR
+      ) {
+        updateData.visibilityStatus =
+          ProviderVisibilityStatus.PENDING_VITRINE_REVIEW;
         updateData.visibilityReason = null;
         updateData.visibilityUpdatedAt = new Date();
         visibilityTransitioned = true;
@@ -628,16 +677,11 @@ export class ProvidersService {
       );
     }
   }
-  async getVisibilityForUser(
-    userId: string,
-  ): Promise<
-    | {
-        visibilityStatus: ProviderVisibilityStatus;
-        visibilityReason: string | null;
-        visibilityUpdatedAt: Date | null;
-      }
-    | null
-  > {
+  async getVisibilityForUser(userId: string): Promise<{
+    visibilityStatus: ProviderVisibilityStatus;
+    visibilityReason: string | null;
+    visibilityUpdatedAt: Date | null;
+  } | null> {
     const provider = await this.prisma.provider.findUnique({
       where: { userId },
       select: {
@@ -668,7 +712,9 @@ export class ProvidersService {
       this.logger.warn(
         `[ProvidersService] setProviderVisibility: Provedor ${providerId} nao encontrado.`,
       );
-      throw new NotFoundException(`Provedor com ID \"${providerId}\" nao encontrado.`);
+      throw new NotFoundException(
+        `Provedor com ID"${providerId}" nao encontrado.`,
+      );
     }
 
     const normalizedReason =
@@ -710,7 +756,10 @@ export class ProvidersService {
       },
     });
 
-    await this.invalidateProviderCache(updatedProvider.id, updatedProvider.userId);
+    await this.invalidateProviderCache(
+      updatedProvider.id,
+      updatedProvider.userId,
+    );
     const mapped = this.mapProviderToCalculatedRating(
       updatedProvider as ProviderWithIncludes,
     );
@@ -721,6 +770,7 @@ export class ProvidersService {
     this.logger.log(
       `[TELEMETRY] provider_visibility_changed: { providerId: ${providerId}, adminId: ${adminId ?? 'system'}, status: ${visibilityStatus}, reason: ${normalizedReason ?? 'none'} }`,
     );
+    void this.warmUpDefaultSearchCache();
     return mapped;
   }
 
@@ -758,7 +808,7 @@ export class ProvidersService {
           },
         },
         bookings: {
-          where: { status: 'FINISHED' }, // â CORRIGIDO
+          where: { status: 'FINISHED' },
           orderBy: { createdAt: 'desc' },
           take: 100,
         },
@@ -1490,6 +1540,7 @@ export class ProvidersService {
     );
     // Telemetria: provider_removed
     this.logger.log(`[TELEMETRY] provider_removed: { providerId: ${id} }`);
+    void this.warmUpDefaultSearchCache();
   }
 
   async search(
@@ -1512,6 +1563,7 @@ export class ProvidersService {
       city,
       state,
     } = searchDto;
+    const isDefaultSearch = this.isDefaultSearchDto(searchDto);
 
     const cacheKey = this.buildSearchCacheKey(searchDto);
     const cachedResult =
@@ -1521,6 +1573,18 @@ export class ProvidersService {
         `[ProvidersService] search: Resultados da busca encontrados no cache.`,
       );
       return cachedResult;
+    }
+
+    if (isDefaultSearch) {
+      const defaultCache = await this.cacheService.get<
+        ProviderWithCalculatedRating[]
+      >(this.DEFAULT_SEARCH_CACHE_KEY);
+      if (defaultCache) {
+        this.logger.log(
+          `[ProvidersService] search: Resultado padrão atendido pelo cache pré-aquecido.`,
+        );
+        return defaultCache;
+      }
     }
 
     const where: Prisma.ProviderWhereInput = {
@@ -1755,11 +1819,11 @@ export class ProvidersService {
           (a, b) => (a.distance || Infinity) - (b.distance || Infinity),
         );
       }
-    await this.cacheService.set(
-      cacheKey,
-      providersWithDistance,
-      this.SEARCH_RESULTS_CACHE_TTL_SECONDS,
-    );
+      await this.cacheSearchResult(
+        cacheKey,
+        providersWithDistance,
+        isDefaultSearch,
+      );
       this.logger.log(
         `[ProvidersService] search: Resultados da busca complexa adicionados ao cache.`,
       );
@@ -1878,15 +1942,30 @@ export class ProvidersService {
       );
     }
 
-    await this.cacheService.set(
-      cacheKey,
-      filteredProviders,
-      this.SEARCH_RESULTS_CACHE_TTL_SECONDS,
-    );
+    await this.cacheSearchResult(cacheKey, filteredProviders, isDefaultSearch);
     this.logger.log(
       `[ProvidersService] search: Resultados da busca complexa (fallback) adicionados ao cache.`,
     );
     return filteredProviders;
+  }
+
+  private async cacheSearchResult(
+    cacheKey: string,
+    result: ProviderWithCalculatedRating[],
+    isDefaultSearch: boolean,
+  ): Promise<void> {
+    await this.cacheService.set(
+      cacheKey,
+      result,
+      this.SEARCH_RESULTS_CACHE_TTL_SECONDS,
+    );
+    if (isDefaultSearch) {
+      await this.cacheService.set(
+        this.DEFAULT_SEARCH_CACHE_KEY,
+        result,
+        this.SEARCH_RESULTS_CACHE_TTL_SECONDS,
+      );
+    }
   }
 
   async findAllProviders(params: {
@@ -2364,15 +2443,15 @@ export class ProvidersService {
               p.reviewsReceived.length
             : 0;
         const completedBookings = p.bookings.filter(
-          (b) => b.status === 'FINISHED', // â CORREÃÃO 1
+          (b) => b.status === 'FINISHED',
         ).length;
         const hasConflict = p.bookings.some(
           (b) =>
             b.scheduledDate.toISOString().split('T')[0] ===
               scheduledDate.toISOString().split('T')[0] &&
-            (b.status === BookingStatus.PENDING || // â CORREÃÃO 2
-              b.status === BookingStatus.CONFIRMED || // â CORREÃÃO 3 (Assumindo que 'CONFIRMED' Ã© 'ACCEPTED')
-              b.status === BookingStatus.STARTED), // â CORREÃÃO 4 (Assumindo que 'IN_PROGRESS' Ã© 'STARTED')
+            (b.status === BookingStatus.PENDING ||
+              b.status === BookingStatus.CONFIRMED ||
+              b.status === BookingStatus.STARTED),
         );
 
         let score = averageRating * 10 + completedBookings;

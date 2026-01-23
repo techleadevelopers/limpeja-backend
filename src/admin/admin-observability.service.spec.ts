@@ -8,9 +8,7 @@ import { LATENCY_CRITICAL_ROUTES } from '../observability/latency-route-config';
 describe('AdminObservabilityService', () => {
   it('builds latencySeriesByRoute for all configured routes and keeps defaults', async () => {
     const sampleTimestamp = new Date().toISOString();
-    const expectedSeries = [
-      { timestamp: sampleTimestamp, latencyMs: 12 },
-    ];
+    const expectedSeries = [{ timestamp: sampleTimestamp, latencyMs: 12 }];
     const observabilityServiceMock = {
       getLatencySeries: jest
         .fn()
@@ -61,6 +59,8 @@ describe('AdminObservabilityService', () => {
         return acc;
       }, {}),
     );
-    expect(snapshot.latencySeries).toBe(snapshot.latencySeriesByRoute[LATENCY_CRITICAL_ROUTES[0]]);
+    expect(snapshot.latencySeries).toBe(
+      snapshot.latencySeriesByRoute[LATENCY_CRITICAL_ROUTES[0]],
+    );
   });
 });

@@ -49,7 +49,7 @@ export class TelemetryMiddleware implements NestMiddleware {
     }
 
     const authHeader =
-      (req.headers?.authorization as string | undefined) ??
+      req.headers?.authorization ??
       (req.headers?.['x-access-token'] as string | undefined);
     const token = this.parseToken(authHeader);
     if (!token) {

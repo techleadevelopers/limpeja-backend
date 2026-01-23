@@ -426,7 +426,9 @@ export class ProvidersController {
   ): Promise<ProviderVisibilityDto> {
     const userId = req.user?.userId;
     if (!userId) {
-      throw new NotFoundException('Dados de usuA!rio nALo encontrados no token.');
+      throw new NotFoundException(
+        'Dados de usuA!rio nALo encontrados no token.',
+      );
     }
     const visibility = await this.providersService.getVisibilityForUser(userId);
     if (!visibility) {

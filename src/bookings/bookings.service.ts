@@ -1,10 +1,4 @@
-﻿import dayjsModule = require('dayjs');
-const dayjs: typeof import('dayjs') =
-  (
-    (dayjsModule as typeof import('dayjs') & {
-      default?: typeof import('dayjs');
-    }).default ?? dayjsModule
-  ) as typeof import('dayjs');
+import dayjs from 'dayjs';
 
 import {
   Injectable,
@@ -1179,12 +1173,6 @@ export class BookingsService {
         createBookingDto.scheduledTime,
       );
 
-      await this.availabilityService.canHoldSlot(
-        provider.id,
-        client.id,
-        scheduledStart,
-      );
-
       const durationMinutes =
         createBookingDto.requestedDurationMinutes ||
         providerService.durationMinutes ||
@@ -1201,27 +1189,6 @@ export class BookingsService {
 
       const { weekStart, weekEnd } = this.getSaoPauloWeekRange(scheduledStart);
       // ✅ overlap check (ANTES de criar address/booking e aplicar cupom)
-      const overlap = await this.prisma.booking.findFirst({
-        where: {
-          providerId: provider.id,
-          status: {
-            in: BLOCKED_BOOKING_STATUSES,
-          },
-          scheduledStart: { lt: scheduledEnd },
-          scheduledEnd: { gt: scheduledStart },
-        },
-        select: { id: true },
-      });
-
-      if (overlap) {
-        throw new ConflictException(
-          await this.i18n.translate(
-            'booking.conflict.timeSlotUnavailable',
-            locale,
-          ),
-        );
-      }
-
       const bookingInclude = this.getBookingInclude();
 
       try {
@@ -1231,6 +1198,34 @@ export class BookingsService {
           weekStart,
           async () => {
             return this.prisma.$transaction(async (tx) => {
+              await this.availabilityService.canHoldSlot(
+                provider.id,
+                client.id,
+                scheduledStart,
+                { prisma: tx },
+              );
+
+              const overlap = await tx.booking.findFirst({
+                where: {
+                  providerId: provider.id,
+                  status: {
+                    in: BLOCKED_BOOKING_STATUSES,
+                  },
+                  scheduledStart: { lt: scheduledEnd },
+                  scheduledEnd: { gt: scheduledStart },
+                },
+                select: { id: true },
+              });
+
+              if (overlap) {
+                throw new ConflictException(
+                  await this.i18n.translate(
+                    'booking.conflict.timeSlotUnavailable',
+                    locale,
+                  ),
+                );
+              }
+
               await this.ensureWeeklyLimit(
                 client.id,
                 provider.id,
@@ -2142,11 +2137,19 @@ export class BookingsService {
             client: {
               is: {
                 OR: [
-                  { fullName: { contains: normalizedSearch, mode: 'insensitive' } },
+                  {
+                    fullName: {
+                      contains: normalizedSearch,
+                      mode: 'insensitive',
+                    },
+                  },
                   {
                     user: {
                       is: {
-                        fullName: { contains: normalizedSearch, mode: 'insensitive' },
+                        fullName: {
+                          contains: normalizedSearch,
+                          mode: 'insensitive',
+                        },
                       },
                     },
                   },
@@ -2158,11 +2161,19 @@ export class BookingsService {
             provider: {
               is: {
                 OR: [
-                  { fullName: { contains: normalizedSearch, mode: 'insensitive' } },
+                  {
+                    fullName: {
+                      contains: normalizedSearch,
+                      mode: 'insensitive',
+                    },
+                  },
                   {
                     user: {
                       is: {
-                        fullName: { contains: normalizedSearch, mode: 'insensitive' },
+                        fullName: {
+                          contains: normalizedSearch,
+                          mode: 'insensitive',
+                        },
                       },
                     },
                   },
@@ -2175,8 +2186,8 @@ export class BookingsService {
       const currentAnd = Array.isArray(where.AND)
         ? where.AND
         : where.AND
-        ? [where.AND]
-        : [];
+          ? [where.AND]
+          : [];
       where.AND = [...currentAnd, searchClause];
     }
 

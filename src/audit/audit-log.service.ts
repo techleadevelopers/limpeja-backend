@@ -7,14 +7,14 @@ export class AuditLogService {
   constructor(private prisma: PrismaService) {}
 
   async log(
-    userId: string,
+    userId: string | null,
     action: string,
     details?: Prisma.InputJsonValue,
     metadata?: { ip?: string; userAgent?: string },
   ) {
     return this.prisma.auditLog.create({
       data: {
-        userId,
+        userId: userId || null,
         action,
         details: details ?? {},
         ipAddress: metadata?.ip,
@@ -22,6 +22,7 @@ export class AuditLogService {
       },
     });
   }
+
   async findAll(limit = 50) {
     return this.prisma.auditLog.findMany({
       take: limit,

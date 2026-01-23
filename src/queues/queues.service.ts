@@ -7,9 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { JobOptions, Queue } from 'bull';
-import {
-  queueWaitingGauge
-} from '../metrics/prometheus';
+import { queueWaitingGauge } from '../metrics/prometheus';
 
 // Interface para estender as opções de tarefa do Bull.js
 interface CustomJobOptions extends JobOptions {

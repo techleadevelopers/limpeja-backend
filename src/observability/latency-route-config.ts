@@ -3,11 +3,14 @@ const CRITICAL_ROUTES = [
   '/search',
   '/search/providers',
   '/search/services',
-  '/api/search',
   '/bookings',
+  '/bookings/{id}',
   '/payments',
   '/payouts',
   '/auth',
+  '/auth/login',
+  '/auth/register/client',
+  '/auth/register/provider',
   '/safety',
 ];
 
