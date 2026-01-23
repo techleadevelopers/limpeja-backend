@@ -35,6 +35,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   private readonly safeCacheTtlSeconds = 300;
+  private readonly payloadCacheTtlSeconds = 180;
+  private readonly payloadSuffix = ':payload';
 
   async validate(payload: {
     sub: string;
@@ -55,7 +57,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     const forceLogoutKey = this.buildForceLogoutKey(payload.sub);
-    const forceLogoutFlag = await this.cacheService.get<true | 'safe'>(
+    const payloadKey = this.buildForceLogoutPayloadKey(payload.sub);
+    const forceLogoutFlag = await this.cacheService.get<true | 'ok'>(
       forceLogoutKey,
     );
     if (forceLogoutFlag === true) {
@@ -68,10 +71,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       });
     }
 
+    if (forceLogoutFlag === 'ok') {
+      const cachedPayload = await this.cacheService.get<RequestUserPayload>(
+        payloadKey,
+      );
+      if (cachedPayload) {
+        return cachedPayload;
+      }
+    }
+
     if (forceLogoutFlag === undefined) {
       await this.cacheService.set(
         forceLogoutKey,
-        'safe',
+        'ok',
         this.safeCacheTtlSeconds,
       );
     }
@@ -148,10 +160,24 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     //   `[JwtStrategy] validate: Usuário ${user.email} (ID: ${user.id}) validado com sucesso. Objeto final de req.user: ${JSON.stringify(userPayload)}`
     // );
 
+    await this.cacheService.set(
+      payloadKey,
+      userPayload,
+      this.payloadCacheTtlSeconds,
+    );
+    await this.cacheService.set(
+      forceLogoutKey,
+      'ok',
+      this.safeCacheTtlSeconds,
+    );
     return userPayload;
   }
 
   private buildForceLogoutKey(userId: string): string {
     return `telemetry:force-logout:${userId}`;
+  }
+
+  private buildForceLogoutPayloadKey(userId: string): string {
+    return `${this.buildForceLogoutKey(userId)}${this.payloadSuffix}`;
   }
 }

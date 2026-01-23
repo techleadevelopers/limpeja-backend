@@ -33,6 +33,7 @@ import { geocodeAddress } from '../utils/geocoding.service';
 import { SettingsService } from '../settings/settings.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
+import * as Sentry from '@sentry/node';
 
 // Type principal para provedores com todas as inclusÃµes necessÃ¡rias para mapeamento
 export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
@@ -199,6 +200,7 @@ export class ProvidersService {
   private readonly RANKING_METRICS_CACHE_TTL_SECONDS = 5 * 60;
   private readonly PUBLIC_PROVIDERS_CACHE_TTL_SECONDS = 60;
   private readonly SEARCH_RESULTS_CACHE_TTL_SECONDS = 5 * 60;
+  private readonly NEGATIVE_SEARCH_CACHE_TTL_SECONDS = 30;
   private readonly DEFAULT_SEARCH_CACHE_KEY = `${this.PROVIDERS_CACHE_KEY}:search`;
   private defaultSearchWarmUpPromise: Promise<void> | null = null;
 
@@ -215,6 +217,7 @@ export class ProvidersService {
     const normalizeString = (value?: string | null): string | null =>
       value?.trim().toLowerCase() ?? null;
 
+    // Apenas os filtros previsíveis entram na chave, evitando qualquer dado sensível ou específico de sessão.
     const normalized = {
       searchTerm: normalizeString(searchDto.searchTerm),
       serviceId: searchDto.serviceId ?? null,
@@ -325,6 +328,7 @@ export class ProvidersService {
   ): Promise<ProviderWithCalculatedRating[]> {
     if (baseLat === undefined || baseLon === undefined) return providers;
     const filtered: ProviderWithCalculatedRating[] = [];
+    const start = Date.now();
 
     // Busca radii em paralelo para os provedores com distance conhecido
     const radii = await Promise.all(
@@ -355,6 +359,13 @@ export class ProvidersService {
         filtered.push(p);
       }
     });
+
+    const elapsedMs = Date.now() - start;
+    if (elapsedMs > 500) {
+      const message = `[ProvidersService] applyRadiusFilter slow: ${elapsedMs}ms (providers=${providers.length}, lat=${baseLat}, lon=${baseLon})`;
+      this.logger.warn(message);
+      Sentry.captureMessage(message, { level: 'warning' });
+    }
 
     return filtered;
   }
@@ -1565,7 +1576,9 @@ export class ProvidersService {
     } = searchDto;
     const isDefaultSearch = this.isDefaultSearchDto(searchDto);
 
-    const cacheKey = this.buildSearchCacheKey(searchDto);
+    const cacheKey = isDefaultSearch
+      ? this.DEFAULT_SEARCH_CACHE_KEY
+      : this.buildSearchCacheKey(searchDto);
     const cachedResult =
       await this.cacheService.get<ProviderWithCalculatedRating[]>(cacheKey);
     if (cachedResult) {
@@ -1573,18 +1586,6 @@ export class ProvidersService {
         `[ProvidersService] search: Resultados da busca encontrados no cache.`,
       );
       return cachedResult;
-    }
-
-    if (isDefaultSearch) {
-      const defaultCache = await this.cacheService.get<
-        ProviderWithCalculatedRating[]
-      >(this.DEFAULT_SEARCH_CACHE_KEY);
-      if (defaultCache) {
-        this.logger.log(
-          `[ProvidersService] search: Resultado padrão atendido pelo cache pré-aquecido.`,
-        );
-        return defaultCache;
-      }
     }
 
     const where: Prisma.ProviderWhereInput = {
@@ -1954,18 +1955,17 @@ export class ProvidersService {
     result: ProviderWithCalculatedRating[],
     isDefaultSearch: boolean,
   ): Promise<void> {
-    await this.cacheService.set(
-      cacheKey,
-      result,
-      this.SEARCH_RESULTS_CACHE_TTL_SECONDS,
-    );
+    const ttl = this.getSearchCacheTtl(result.length);
+    await this.cacheService.set(cacheKey, result, ttl);
     if (isDefaultSearch) {
-      await this.cacheService.set(
-        this.DEFAULT_SEARCH_CACHE_KEY,
-        result,
-        this.SEARCH_RESULTS_CACHE_TTL_SECONDS,
-      );
+      await this.cacheService.set(this.DEFAULT_SEARCH_CACHE_KEY, result, ttl);
     }
+  }
+
+  private getSearchCacheTtl(resultLength: number): number {
+    return resultLength === 0
+      ? this.NEGATIVE_SEARCH_CACHE_TTL_SECONDS
+      : this.SEARCH_RESULTS_CACHE_TTL_SECONDS;
   }
 
   async findAllProviders(params: {

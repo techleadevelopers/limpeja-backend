@@ -9,6 +9,9 @@ export class TelemetryService {
   private readonly threshold = 5;
   private readonly windowSeconds = 10;
   private readonly anomalyCooldownSeconds = 60;
+  private readonly forceLogoutSafeTtlSeconds = 180;
+  private readonly forceLogoutPayloadTtlSeconds = 180;
+  private readonly forceLogoutPayloadSuffix = ':payload';
 
   constructor(
     private readonly cacheService: CacheService,
@@ -83,7 +86,9 @@ export class TelemetryService {
     }
 
     const key = this.buildForceLogoutKey(userId);
+    const payloadKey = this.buildForceLogoutPayloadKey(userId);
     await this.cacheService.del(key);
+    await this.cacheService.del(payloadKey);
     await this.cacheService.set(key, true, ttlSeconds);
     this.logger.warn(
       `[TelemetryService] markForceLogout: usuário ${userId} bloqueado automaticamente por ${ttlSeconds}s`,
@@ -92,6 +97,10 @@ export class TelemetryService {
 
   private buildForceLogoutKey(userId: string): string {
     return `telemetry:force-logout:${userId}`;
+  }
+
+  buildForceLogoutPayloadKey(userId: string): string {
+    return `${this.buildForceLogoutKey(userId)}${this.forceLogoutPayloadSuffix}`;
   }
 
   private async incrementCounter(key: string): Promise<number> {
