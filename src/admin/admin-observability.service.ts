@@ -370,10 +370,8 @@ export class AdminObservabilityService {
           ).toFixed(2),
         );
       }
-
       return entry;
     });
-
     return {
       latencySeries,
       latencyAverages: this.calculateLatencyAverages(rawSeries),
