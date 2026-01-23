@@ -381,10 +381,22 @@ model User {
 
   // CORREÇÃO: Adicionado para relação bilateral com CouponReservation
   couponReservations    CouponReservation[]
+  telemetryForceLogout   TelemetryForceLogout?
 
   // ADICIONADO: Relações para auditoria de Booking (quem iniciou/finalizou)
   startedBookings       Booking[]          @relation("BookingStartedBy")
   completedBookings     Booking[]          @relation("BookingCompletedBy")
+}
+
+model TelemetryForceLogout {
+  userId           String   @id @db.Uuid
+  forcedAt         DateTime @default(now())
+  forceLogoutUntil DateTime
+  payload          Json?
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([forceLogoutUntil], name: "idx_telemetry_force_logout_until")
 }
 
 model PasswordResetToken {
@@ -743,7 +755,7 @@ model MessagePolicyHit {
 model Notification {
   id               String   @id @default(uuid())
   userId           String
-  user             User     @relation(fields: [userId], references: [id])
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   type             String
   message          String
   isRead           Boolean  @default(false)
