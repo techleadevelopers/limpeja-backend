@@ -362,7 +362,6 @@ export class AdminObservabilityService {
           collected.push(latency);
         }
       });
-
       if (collected.length > 0) {
         entry.criticalAverage = Number(
           (
@@ -416,7 +415,7 @@ export class AdminObservabilityService {
       this.logger.warn(`[AdminHealth] ${message}`);
       return this.buildSentryError('Falha na conexão com o Sentry');
     }
-
+    
     const cached =
       (await this.cacheService.get<SentryObservabilityResult | null>(
         this.sentryCacheKey,
