@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { File } from 'multer';
-import { DocumentProcessingService } from '../document-processing/document-processing.service';
+import {
+  DocumentProcessingOptions,
+  DocumentProcessingService,
+} from '../document-processing/document-processing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ProvidersService,
@@ -64,7 +67,11 @@ export class VerificationService {
     return providers || [];
   }
 
-  async uploadAvatar(providerId: string, file: File): Promise<string> {
+  async uploadAvatar(
+    providerId: string,
+    file: File,
+    options?: DocumentProcessingOptions,
+  ): Promise<string> {
     this.logger.log(
       `[VerificationService] uploadAvatar: Iniciando para providerId: ${providerId}`,
     );
@@ -75,6 +82,8 @@ export class VerificationService {
       (extension) =>
         `provider-documents/${providerId}/avatar-${Date.now()}.${extension}`,
       (fileUrl) => ({ avatarUrl: fileUrl }),
+      false,
+      options,
     );
     this.logger.log(
       `[VerificationService] uploadAvatar: Avatar enviado para ${fileUrl}`,
@@ -148,6 +157,7 @@ export class VerificationService {
     destinationPathBuilder: (extension: string) => string,
     updateDataBuilder: (fileUrl: string) => Prisma.ProviderUpdateInput,
     shouldRefreshStatus = false,
+    processingOptions?: DocumentProcessingOptions,
   ): Promise<string> {
     const provider = await this.providersService.findOne(providerId);
     if (!provider) {
@@ -163,6 +173,8 @@ export class VerificationService {
     const fileUrl = await this.documentProcessingService.uploadImage(
       file,
       destinationPath,
+      undefined,
+      processingOptions,
     );
 
     await this.prisma.provider.update({

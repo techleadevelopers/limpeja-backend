@@ -929,9 +929,6 @@ export class ProvidersService {
   }
 
   async findOne(id: string): Promise<ProviderWithCalculatedRating | null> {
-    this.logger.log(
-      `[ProvidersService] findOne: Buscando provedor por ID: ${id}`,
-    );
     const cacheKey = `${this.PROVIDERS_CACHE_KEY}:${id}`;
     let provider =
       await this.cacheService.get<ProviderWithCalculatedRating>(cacheKey);
@@ -983,14 +980,8 @@ export class ProvidersService {
         provider,
         this.PUBLIC_PROVIDERS_CACHE_TTL_SECONDS,
       );
-      this.logger.log(
-        `[ProvidersService] findOne: Provedor ${id} adicionado ao cache.`,
-      );
       return provider;
     }
-    this.logger.log(
-      `[ProvidersService] findOne: Resultado para ID ${id}: ${prismaProvider ? 'ENCONTRADO' : 'NÃO ENCONTRADO'}`,
-    );
     return null;
   }
 

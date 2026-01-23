@@ -749,9 +749,6 @@ export class ProvidersController {
   })
   @ApiResponse({ status: 404, description: 'Provedor não encontrado.' })
   async findOne(@Param('id') id: string): Promise<ProviderDetailsDto> {
-    this.logger.log(
-      `[ProvidersController] findOne: Buscando provedor por ID: ${id}`,
-    );
     const provider = await this.providersService.findOne(id);
     if (!provider) {
       this.logger.warn(
@@ -759,9 +756,6 @@ export class ProvidersController {
       );
       throw new NotFoundException(`Provedor com ID "${id}" não encontrado.`);
     }
-    this.logger.log(
-      `[ProvidersController] findOne: Provedor ${id} encontrado.`,
-    );
     // NOVO: Inclui novos campos opcionais (ex.: nextAvailable, badges)
     return new ProviderDetailsDto(provider);
   }
