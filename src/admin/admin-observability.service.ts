@@ -451,10 +451,10 @@ export class AdminObservabilityService {
         }),
       ]);
 
-      this.logger.debug(
+      this.logger.verbose(
         `[AdminHealth] Sentry issues URL: ${issuesResponse.config?.url}`,
       );
-      this.logger.debug(
+      this.logger.verbose(
         `[AdminHealth] Sentry project URL: ${projectResponse.config?.url}`,
       );
 

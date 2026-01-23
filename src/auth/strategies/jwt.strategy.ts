@@ -58,7 +58,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const forceLogoutKey = this.buildForceLogoutKey(payload.sub);
     const payloadKey = this.buildForceLogoutPayloadKey(payload.sub);
-    const forceLogoutFlag = await this.cacheService.get<true | 'ok'>(
+    const forceLogoutFlag = await this.cacheService.get<true | 'OK'>(
       forceLogoutKey,
     );
     if (forceLogoutFlag === true) {
@@ -71,7 +71,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       });
     }
 
-    if (forceLogoutFlag === 'ok') {
+    if (forceLogoutFlag === 'OK') {
       const cachedPayload = await this.cacheService.get<RequestUserPayload>(
         payloadKey,
       );
@@ -81,9 +81,24 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     if (forceLogoutFlag === undefined) {
+      const blockedUntil = await this.getActiveForceLogoutUntil(payload.sub);
+      if (blockedUntil) {
+        const remainingSeconds = Math.max(
+          1,
+          Math.ceil((blockedUntil.getTime() - Date.now()) / 1000),
+        );
+        await this.cacheService.set(forceLogoutKey, true, remainingSeconds);
+        this.logger.warn(
+          `[JwtStrategy] validate: ${payload.sub} bloqueado por logout forçado persistente até ${blockedUntil.toISOString()}`,
+        );
+        throw new UnauthorizedException({
+          message: 'Sessão encerrada por medidas administrativas.',
+          code: AuthErrorCode.TOKEN_REVOKED,
+        });
+      }
       await this.cacheService.set(
         forceLogoutKey,
-        'ok',
+        'OK',
         this.safeCacheTtlSeconds,
       );
     }
@@ -167,7 +182,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     );
     await this.cacheService.set(
       forceLogoutKey,
-      'ok',
+      'OK',
       this.safeCacheTtlSeconds,
     );
     return userPayload;
@@ -179,5 +194,26 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   private buildForceLogoutPayloadKey(userId: string): string {
     return `${this.buildForceLogoutKey(userId)}${this.payloadSuffix}`;
+  }
+
+  private async getActiveForceLogoutUntil(userId: string): Promise<Date | null> {
+    const record = await this.prisma.telemetryForceLogout.findUnique({
+      where: { userId },
+    });
+    if (!record) {
+      return null;
+    }
+
+    const now = new Date();
+    if (record.forceLogoutUntil > now) {
+      return record.forceLogoutUntil;
+    }
+
+    try {
+      await this.prisma.telemetryForceLogout.delete({ where: { userId } });
+    } catch {
+      // Concurrency or already-removed record; ignore.
+    }
+    return null;
   }
 }

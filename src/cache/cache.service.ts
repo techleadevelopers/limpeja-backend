@@ -24,7 +24,7 @@ export class CacheService {
       if (value) {
         this.logger.debug(`Cache HIT for key: ${key}`);
       } else {
-        this.logger.debug(`Cache MISS for key: ${key}`);
+        this.logger.verbose(`Cache MISS for key: ${key}`);
       }
       return value;
     } catch (error) {

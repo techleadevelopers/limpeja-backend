@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CacheService } from '../cache/cache.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { TelemetryEventsService } from './telemetry.events.service';
 import { TelemetryAnomalyPayload } from './telemetry.types';
 
@@ -16,6 +17,7 @@ export class TelemetryService {
   constructor(
     private readonly cacheService: CacheService,
     private readonly events: TelemetryEventsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async recordRequest(
@@ -90,6 +92,26 @@ export class TelemetryService {
     await this.cacheService.del(key);
     await this.cacheService.del(payloadKey);
     await this.cacheService.set(key, true, ttlSeconds);
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+    try {
+      await this.prisma.telemetryForceLogout.upsert({
+        where: { userId },
+        update: {
+          forceLogoutUntil: expiresAt,
+          forcedAt: new Date(),
+        },
+        create: {
+          userId,
+          forceLogoutUntil: expiresAt,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `[TelemetryService] markForceLogout: falha ao persistir logout forçado para ${userId}: ${
+          (error as Error).message ?? error
+        }`,
+      );
+    }
     this.logger.warn(
       `[TelemetryService] markForceLogout: usuário ${userId} bloqueado automaticamente por ${ttlSeconds}s`,
     );

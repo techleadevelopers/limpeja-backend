@@ -28,6 +28,8 @@ import { Message } from '../entities/message.entity';
     origin: '*', // Ajuste para a origem do seu frontend em produção
     credentials: true,
   },
+  pingTimeout: 60000,
+  pingInterval: 25000,
   // Adaptação para scaling horizontal com Redis
   // adapter: (() => {
   //   const pubClient = createClient({ host: process.env.REDIS_HOST, port: parseInt(process.env.REDIS_PORT || '6379', 10), password: process.env.REDIS_PASSWORD });
