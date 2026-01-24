@@ -2392,8 +2392,10 @@ export class BookingsService {
       );
     }
 
-    this.logger.log(
-      `[BookingsService] findUserBookings: Cláusula WHERE final: ${JSON.stringify(whereClause)}`,
+    this.logger.debug(
+      `[BookingsService] findUserBookings: Cláusula WHERE final: ${JSON.stringify(
+        whereClause,
+      )}`,
     );
     const bookingInclude: Prisma.BookingInclude = {
       ...DEFAULT_BOOKING_DETAILS_INCLUDE,
