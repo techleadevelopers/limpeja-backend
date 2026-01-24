@@ -173,12 +173,14 @@ export class AvailabilityService {
     const bookingsOnDate = await this.prisma.booking.findMany({
       where: {
         providerId: providerId,
-        scheduledDate: {
-          gte: rangeStart,
-          lte: rangeEnd,
-        },
         status: {
           in: BLOCKED_BOOKING_STATUSES,
+        },
+        scheduledStart: {
+          lt: rangeEnd,
+        },
+        scheduledEnd: {
+          gt: rangeStart,
         },
       },
       select: {
