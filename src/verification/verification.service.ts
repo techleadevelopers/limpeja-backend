@@ -9,7 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { File } from 'multer';
 import axios from 'axios';
-import * as FormData from 'form-data';
+import FormData = require('form-data');
 import { DocumentProcessingService } from '../document-processing/document-processing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
