@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { File } from 'multer';
 import { UploadService } from '../upload/upload.service';
-import { CloudinaryUploadService } from '../upload/cloudinary-upload.service';
 import { PremiumAvatarPipelineService } from './premium-avatar-pipeline.service';
 
 export interface DocumentProcessingOptions {
@@ -20,7 +19,6 @@ export class DocumentProcessingService {
   constructor(
     private readonly uploadService: UploadService,
     private readonly premiumAvatarPipeline: PremiumAvatarPipelineService,
-    private readonly cloudinaryUploadService: CloudinaryUploadService,
   ) {}
 
   async uploadImage(
@@ -46,20 +44,6 @@ export class DocumentProcessingService {
             processError,
           );
         }
-      }
-
-      if (this.cloudinaryUploadService.isConfigured()) {
-        const folder =
-          destinationPath
-            ?.split('/')
-            .slice(0, -1)
-            .join('/') || undefined;
-        const url = await this.cloudinaryUploadService.uploadBuffer(
-          buffer,
-          filename,
-          folder,
-        );
-        return url;
       }
 
       const result = await this.uploadService.uploadFile(buffer, filename, mimeType);
