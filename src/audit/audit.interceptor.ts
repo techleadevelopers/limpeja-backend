@@ -69,13 +69,50 @@ export class AuditInterceptor implements NestInterceptor {
           : dataOrError,
     };
 
+    const locationAudit = this.extractLocationAuditDetails(
+      sanitizedRequest.body ?? body,
+    );
+    const auditDetails: Record<string, any> = {
+      request: sanitizedRequest,
+      response: responsePreview,
+    };
+    if (locationAudit) {
+      auditDetails.locationChange = locationAudit;
+    }
+
     this.auditLogService
       .log(
         user.userId,
         `${method} ${url}`,
-        { request: sanitizedRequest, response: responsePreview },
+        auditDetails,
         { ip, userAgent },
       )
       .catch((err) => this.logger.error('Failed to save audit log', err));
+  }
+
+  private extractLocationAuditDetails(body: any): Record<string, string> | undefined {
+    const address = body?.address;
+    if (!address || typeof address !== 'object') {
+      return undefined;
+    }
+
+    const normalizedFields = ['cep', 'city', 'state', 'street', 'number', 'neighborhood', 'complement'];
+    const auditPayload: Record<string, string> = {};
+    normalizedFields.forEach((field) => {
+      const value = address[field];
+      if (value) {
+        auditPayload[field] = String(value);
+      }
+    });
+
+    if (!Object.keys(auditPayload).length) {
+      return undefined;
+    }
+
+    if (auditPayload.city) {
+      auditPayload.cityNormalized = auditPayload.city.trim().toUpperCase();
+    }
+
+    return auditPayload;
   }
 }
