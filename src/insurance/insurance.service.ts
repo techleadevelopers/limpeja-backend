@@ -90,30 +90,18 @@ export class InsuranceService {
     };
   }
 
-  private evaluateEligibility(
+private evaluateEligibility(
     plan: InsurancePlanDefinition,
     context: InsurancePlansCalculationContext,
   ): { eligible: boolean; reasons: string[] } {
     const reasons: string[] = [];
-    switch (plan.id) {
-      case InsurancePlanId.PREMIUM:
-        if (context.clientCompleted < 2) {
-          reasons.push('Requer pelo menos 2 limpezas concluídas.');
-        }
-        break;
-      case InsurancePlanId.TOTAL:
-        if (context.clientCompleted < 5) {
-          reasons.push('Requer pelo menos 5 limpezas concluídas.');
-        }
-        if (context.provider.rating <= 4.85) {
-          reasons.push('Requer nota do prestador superior a 4.85.');
-        }
-        break;
-    }
+    
+    // Remova ou comente o switch que faz as verificações de clientCompleted e rating
+    // Deixando o array 'reasons' sempre vazio, o retorno será sempre eligible: true
 
     return {
-      eligible: reasons.length === 0,
-      reasons,
+      eligible: true, // Força a elegibilidade
+      reasons: [],    // Garante que não existam mensagens de bloqueio
     };
   }
 
