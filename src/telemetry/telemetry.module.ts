@@ -29,7 +29,7 @@ import { QueuesModule } from '../queues/queues.module';
     TelemetryNotificationService,
     TelemetryMiddleware,
   ],
-  exports: [TelemetryService],
+  exports: [TelemetryService, TelemetryEventsService],
 })
 export class TelemetryModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
