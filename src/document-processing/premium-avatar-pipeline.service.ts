@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import FormData from 'form-data';
-import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
+// AJUSTE AQUI:
+import { v2 as cloudinary } from 'cloudinary';
+import type { UploadApiResponse } from 'cloudinary';
 
 export interface PremiumAvatarPipelineResult {
   buffer: Buffer;
