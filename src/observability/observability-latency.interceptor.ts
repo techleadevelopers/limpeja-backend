@@ -53,6 +53,7 @@ export class ObservabilityLatencyInterceptor implements NestInterceptor {
       finalize(() => {
         const elapsedMs =
           Number(process.hrtime.bigint() - start) / 1_000_000 || 0;
+        this.attachResponseTimeHeader(request, elapsedMs);
         if (!this.shouldSample(routeKey)) {
           return;
         }
@@ -127,5 +128,19 @@ export class ObservabilityLatencyInterceptor implements NestInterceptor {
       return false;
     }
     return true;
+  }
+
+  private attachResponseTimeHeader(
+    request: Record<string, any>,
+    elapsedMs: number,
+  ) {
+    const response = request.res ?? request.response;
+    if (
+      response &&
+      typeof response.setHeader === 'function' &&
+      !response.headersSent
+    ) {
+      response.setHeader('X-Response-Time', `${elapsedMs.toFixed(2)}ms`);
+    }
   }
 }
