@@ -4,13 +4,13 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { File } from 'multer';
-import {
-  DocumentProcessingOptions,
-  DocumentProcessingService,
-} from '../document-processing/document-processing.service';
+import axios from 'axios';
+import FormData from 'form-data';
+import { DocumentProcessingService } from '../document-processing/document-processing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ProvidersService,
@@ -70,28 +70,67 @@ export class VerificationService {
   async uploadAvatar(
     providerId: string,
     file: File,
-    options?: DocumentProcessingOptions,
+    options?: { premiumAvatar?: boolean },
   ): Promise<string> {
     this.logger.log(
       `[VerificationService] uploadAvatar: Iniciando para providerId: ${providerId}`,
     );
-    const fileUrl = await this.handleDocumentUpload(
-      providerId,
-      file,
-      'uploadAvatar',
-      (extension) =>
-        `provider-documents/${providerId}/avatar-${Date.now()}.${extension}`,
-      (fileUrl) => ({ avatarUrl: fileUrl }),
-      false,
-      options,
-    );
-    this.logger.log(
-      `[VerificationService] uploadAvatar: Avatar enviado para ${fileUrl}`,
-    );
-    this.logger.log(
-      `[VerificationService] URL do avatar salva para provider ${providerId}.`,
-    );
-    return fileUrl;
+    if (options?.premiumAvatar) {
+      this.logger.log(
+        `[VerificationService] uploadAvatar: Pipeline premium solicitado para providerId: ${providerId}.`,
+      );
+    }
+
+    const visionUrl = process.env.VISION_IA_URL;
+    if (!visionUrl) {
+      this.logger.error(
+        '[VerificationService] uploadAvatar: VISION_IA_URL não configurada.',
+      );
+      throw new InternalServerErrorException('Visão IA ausente.');
+    }
+
+    const form = new FormData();
+    const filename = file.originalname || `avatar-${Date.now()}.jpg`;
+    form.append('file', file.buffer, {
+      filename,
+      contentType: file.mimetype || 'image/jpeg',
+    } as any);
+
+    let responseUrl: string | undefined;
+    try {
+      const response = await axios.post(
+        `${visionUrl}/vision/process-avatar`,
+        form,
+        {
+          headers: form.getHeaders(),
+          timeout: 20000,
+        },
+      );
+      responseUrl = response.data?.url;
+    } catch (error: any) {
+      this.logger.error(
+        `[VerificationService] uploadAvatar: Falha ao chamar Vision IA: ${error?.message || error}`,
+      );
+      throw new InternalServerErrorException('Falha ao processar avatar.');
+    }
+
+    if (!responseUrl) {
+      this.logger.error(
+        '[VerificationService] uploadAvatar: Vision IA não retornou URL.',
+      );
+      throw new InternalServerErrorException('Vision IA não retornou URL.');
+    }
+
+    // Atualiza o banco com a foto TRATADA pela IA
+    await this.prisma.provider.update({
+      where: { id: providerId },
+      data: { avatarUrl: responseUrl },
+    });
+
+    this.logger.log(`[VerificationService] Avatar processado com sucesso: ${responseUrl}`);
+
+    // RETORNO ÚNICO: A URL da foto com fundo cinza
+    return responseUrl;
   }
 
   async uploadDocumentPhoto(
@@ -157,7 +196,6 @@ export class VerificationService {
     destinationPathBuilder: (extension: string) => string,
     updateDataBuilder: (fileUrl: string) => Prisma.ProviderUpdateInput,
     shouldRefreshStatus = false,
-    processingOptions?: DocumentProcessingOptions,
   ): Promise<string> {
     const provider = await this.providersService.findOne(providerId);
     if (!provider) {
@@ -174,7 +212,6 @@ export class VerificationService {
       file,
       destinationPath,
       undefined,
-      processingOptions,
     );
 
     await this.prisma.provider.update({
