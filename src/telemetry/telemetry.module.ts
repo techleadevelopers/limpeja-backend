@@ -16,7 +16,12 @@ import { TelemetryService } from './telemetry.service';
 import { QueuesModule } from '../queues/queues.module';
 
 @Module({
-  imports: [CacheModule, AuthModule, ChatModule, forwardRef(() => QueuesModule)],
+  imports: [
+    CacheModule,
+    forwardRef(() => AuthModule),
+    ChatModule,
+    forwardRef(() => QueuesModule),
+  ],
   controllers: [TelemetryController],
   providers: [
     TelemetryService,
