@@ -1,5 +1,5 @@
 // src/chat/chat.module.ts
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -12,7 +12,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   imports: [
     PrismaModule,
-    AuthModule, // <--- Certifique-se de que AuthModule está importado aqui
+    forwardRef(() => AuthModule), // avoid circular dependency with Auth → Notifications → Chat
     CacheModule,
     NotificationsModule,
   ],
