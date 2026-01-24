@@ -9,7 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { File } from 'multer';
 import axios from 'axios';
-import FormData from 'form-data';
+import * as FormData from 'form-data';
 import { DocumentProcessingService } from '../document-processing/document-processing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -97,21 +97,32 @@ export class VerificationService {
     } as any);
 
     let responseUrl: string | undefined;
+    const visionStart = Date.now();
     try {
       const response = await axios.post(
         `${visionUrl}/vision/process-avatar`,
         form,
         {
           headers: form.getHeaders(),
-          timeout: 60_000,
-        },
-      );
-      responseUrl = response.data?.url;
-    } catch (error: any) {
-      this.logger.error(
-        `[VerificationService] uploadAvatar: Falha ao chamar Vision IA: ${error?.message || error}`,
-      );
-    }
+        timeout: 60_000,
+      },
+    );
+    responseUrl = response.data?.url;
+    this.logger.log(
+      `[VerificationService] uploadAvatar: Vision IA respondeu em ${
+        Date.now() - visionStart
+      } ms.`,
+    );
+  } catch (error: any) {
+    this.logger.error(
+      `[VerificationService] uploadAvatar: Falha ao chamar Vision IA: ${error?.message || error}`,
+    );
+    this.logger.log(
+      `[VerificationService] uploadAvatar: Vision IA falhou após ${
+        Date.now() - visionStart
+      } ms.`,
+    );
+  }
 
     if (!responseUrl) {
       this.logger.warn(
