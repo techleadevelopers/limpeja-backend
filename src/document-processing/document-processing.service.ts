@@ -6,45 +6,23 @@ import {
 } from '@nestjs/common';
 import { File } from 'multer';
 import { UploadService } from '../upload/upload.service';
-import { PremiumAvatarPipelineService } from './premium-avatar-pipeline.service';
-
-export interface DocumentProcessingOptions {
-  premiumAvatar?: boolean;
-}
 
 @Injectable()
 export class DocumentProcessingService {
   private readonly logger = new Logger(DocumentProcessingService.name);
 
-  constructor(
-    private readonly uploadService: UploadService,
-    private readonly premiumAvatarPipeline: PremiumAvatarPipelineService,
-  ) {}
+  constructor(private readonly uploadService: UploadService) {}
 
   async uploadImage(
     file: File,
     destinationPath: string,
     _slug?: string,
-    options?: DocumentProcessingOptions,
   ): Promise<string> {
     try {
       const filename =
         destinationPath?.split('/')?.pop() || file.originalname || 'upload.jpg';
-      let buffer = file.buffer;
-      let mimeType = file.mimetype;
-
-      if (options?.premiumAvatar) {
-        try {
-          const processed = await this.premiumAvatarPipeline.process(buffer, mimeType);
-          buffer = processed.buffer;
-          mimeType = processed.mimeType;
-        } catch (processError) {
-          this.logger.warn(
-            'Pipeline Premium Showcase falhou. Usando imagem original.',
-            processError,
-          );
-        }
-      }
+      const buffer = file.buffer;
+      const mimeType = file.mimetype;
 
       const result = await this.uploadService.uploadFile(buffer, filename, mimeType);
       if (!result?.url) throw new Error('UploadThing não retornou URL pública');
