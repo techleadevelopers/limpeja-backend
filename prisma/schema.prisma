@@ -338,7 +338,7 @@ model User {
   fullName              String             @default("Nome Padrão")
   fcmToken              String?            @unique
   isPhoneVerified       Boolean            @default(false)
-  isVerified            Boolean            @default(false)
+  isVerified            Boolean            @default(true)
   deletionScheduledAt   DateTime?
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
