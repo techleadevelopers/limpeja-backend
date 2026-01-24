@@ -18,7 +18,9 @@
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@nestjs/bull/lib/*": ["node_modules/@nestjs/bull/dist/*"],
+      "@nestjs/bullmq/lib/*": ["node_modules/@nestjs/bullmq/dist/*"]
     },
     "typeRoots": [
       "./node_modules/@types",
