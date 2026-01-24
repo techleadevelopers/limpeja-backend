@@ -29,7 +29,7 @@ import { SortByOption } from '../search/dto/search-query.dto';
 import { ProviderSearchDto } from './dto/provider-search.dto';
 import { UpdateProviderProfileDto } from './dto/update-provider-profile.dto';
 import { Decimal } from '@prisma/client/runtime/library';
-import { geocodeAddress } from '../utils/geocoding.service';
+import { GeocodingService } from '../geocoding/geocoding.service';
 import { SettingsService } from '../settings/settings.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { GetAvailabilityDto } from '../availability/dto/get-availability.dto';
@@ -163,6 +163,8 @@ export type ProviderWithCalculatedRating = {
   averageResponseTime?: number; // NOVO: Para mÃ©tricas mini
   // NOVO: Campo para boosts de gamificaÃ§Ã£o no score de ranking
   rankingBoostScore?: number; // Representa o +beta, +gamma, +delta
+  // NOVO: Prioridade para ranking geoespacial
+  sortPriority?: number;
   // NOVO: Para chip de horÃ¡rio (calculado no service)
   nextAvailable?: { date: string; time: string };
 };
@@ -209,6 +211,7 @@ export class ProvidersService {
     private readonly documentProcessingService: DocumentProcessingService,
     private readonly cacheService: CacheService,
     private readonly settingsService: SettingsService,
+    private readonly geocodingService: GeocodingService,
     @Inject(forwardRef(() => AvailabilityService))
     private readonly availabilityService: AvailabilityService,
   ) {}
@@ -610,6 +613,7 @@ export class ProvidersService {
       acceptanceRate: provider.acceptanceRate || 0, // NOVO: Default 0 para mÃ©tricas
       averageResponseTime: provider.averageResponseTime || 0, // NOVO: Default 0 para mÃ©tricas
       rankingBoostScore: rankingBoostScore, // NOVO CAMPO
+      sortPriority: provider.sortPriority ?? 0,
       nextAvailable, // NOVO: Calculado para chip de horÃ¡rio
     };
   }
@@ -1254,7 +1258,9 @@ export class ProvidersService {
       const addressString = this.buildAddressString(
         data.address as Partial<Address>,
       );
-      const geo = addressString ? await geocodeAddress(addressString) : null;
+      const geo = addressString
+        ? await this.geocodingService.geocodeAddress(addressString)
+        : null;
       const coords = this.applyGeocodeFallback(
         data.address as Partial<Address>,
         geo,
@@ -1373,7 +1379,9 @@ export class ProvidersService {
       const addressString = this.buildAddressString(
         data.address as Partial<Address>,
       );
-      const geo = addressString ? await geocodeAddress(addressString) : null;
+      const geo = addressString
+        ? await this.geocodingService.geocodeAddress(addressString)
+        : null;
       const coords = this.applyGeocodeFallback(
         data.address as Partial<Address>,
         geo,
@@ -1545,6 +1553,143 @@ export class ProvidersService {
     void this.warmUpDefaultSearchCache();
   }
 
+  private async findNearbyProvidersRaw(
+    latitude: number,
+    longitude: number,
+    radiusMeters: number,
+    limit: number,
+  ): Promise<any[]> {
+    const enforcedLimit = Math.max(1, Math.floor(limit));
+    return this.prisma.$queryRaw(
+      Prisma.sql`
+        SELECT
+          p.id,
+          p."userId",
+          p."fullName",
+          p.phone,
+          p.bio,
+          p."yearsOfExperience",
+          p.cpf,
+          p."dateOfBirth",
+          p."avatarUrl",
+          p."verificationStatus",
+          p."visibilityStatus",
+          p."visibilityReason",
+          p."visibilityUpdatedAt",
+          p."pixKey",
+          p."createdAt",
+          p."updatedAt",
+          p."documentPhotoFrontUrl",
+          p."documentPhotoBackUrl",
+          p."selfieWithDocumentUrl",
+          p."backgroundCheckResult",
+          p."rejectionReason",
+          p."ocrResult",
+          p."livenessResult",
+          p.badges,
+          p."sortPriority",
+          p."acceptanceRate",
+          p."averageResponseTime",
+          u.email,
+          u.role,
+          u."isVerified",
+          u."fullName" AS user_fullName,
+          u."phone" AS user_phone,
+          a.id AS "addressId",
+          a.cep,
+          a.street,
+          a.number,
+          a.complement,
+          a.neighborhood,
+          a.city,
+          a.state,
+          a."providerId",
+          COALESCE(ST_X(a.location), a.longitude::double precision) AS longitude_val,
+          COALESCE(ST_Y(a.location), a.latitude::double precision) AS latitude_val,
+          a.location AS address_location,
+          CASE
+            WHEN a.location IS NOT NULL THEN
+              ST_Distance(
+                a.location::geography,
+                ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography
+              )
+            WHEN a.longitude IS NOT NULL AND a.latitude IS NOT NULL THEN
+              ST_Distance(
+                ST_SetSRID(ST_MakePoint(a.longitude::double precision, a.latitude::double precision), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography
+              )
+            ELSE NULL
+          END AS distance_m,
+          COALESCE(AVG(r.rating), 0)::numeric AS "averageRating",
+          COUNT(r.id)::int AS "reviewCount",
+          p."fiveStarReviewCount",
+          p."monthlyBookingsCount",
+          json_agg(
+              json_build_object(
+                  'id', ps.id,
+                  'providerId', ps."providerId",
+                  'serviceId', ps."serviceId",
+                  'price', ps.price,
+                  'durationMinutes', ps."durationMinutes",
+                  'createdAt', ps."createdAt",
+                  'updatedAt', ps."updatedAt",
+                  'description', ps.description,
+                  'pricingType', ps."pricingType",
+                  'pricePerHour', ps."pricePerHour",
+                  'pricePerSquareMeter', ps."pricePerSquareMeter",
+                  'pricePerRoom', ps."pricePerRoom",
+                  'service', json_build_object(
+                      'id', s.id,
+                      'name', s.name,
+                      'description', s.description,
+                      'icon', s.icon,
+                      'price', s.price,
+                      'createdAt', s."createdAt",
+                      'updatedAt', s."updatedAt"
+                  )
+              )
+              ORDER BY ps.id
+          ) FILTER (WHERE ps.id IS NOT NULL) AS "providerServicesAgg"
+        FROM
+            "Provider" p
+        JOIN
+            "User" u ON p."userId" = u.id
+        LEFT JOIN
+            "Address" a ON p.id = a."providerId"
+        LEFT JOIN
+            "ProviderService" ps ON p.id = ps."providerId"
+        LEFT JOIN
+            "Service" s ON ps."serviceId" = s.id
+        LEFT JOIN
+            "Review" r ON p.id = r."providerId"
+        WHERE
+            p."verificationStatus"::text = ${Prisma.raw(
+              `'${VerificationStatus.APPROVED}'`,
+            )}
+            AND p."visibilityStatus"::text = ${Prisma.raw(
+              `'${ProviderVisibilityStatus.VISIBLE}'`,
+            )}
+            AND ST_DWithin(
+                a.location::geography,
+                ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography,
+                ${radiusMeters}
+            )
+        GROUP BY
+            p.id, u.email, u.role, u."isVerified", u."fullName", u."phone",
+            a.id, a.cep, a.street, a.number, a.complement, a.neighborhood,
+            a.city, a.state, a."providerId", a.location,
+            p."fiveStarReviewCount", p."monthlyBookingsCount", p.badges,
+            p."sortPriority",
+            p."acceptanceRate", p."averageResponseTime", p."verificationStatus",
+            p."visibilityStatus", p."visibilityReason", p."visibilityUpdatedAt"
+        ORDER BY
+            p."sortPriority" DESC,
+            a.location <-> ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)
+        LIMIT ${enforcedLimit};
+      `,
+    );
+  }
+
   async search(
     searchDto: ProviderSearchDto,
   ): Promise<ProviderWithCalculatedRating[]> {
@@ -1637,39 +1782,12 @@ export class ProvidersService {
       );
 
       try {
-        const rawProviders: any[] = await this.prisma.$queryRaw(
-          Prisma.sql`
-    SELECT 
-        p.id, 
-        p."userId", 
-        p."fullName", 
-      p."avatarUrl", 
-      p."verificationStatus",
-      p."visibilityStatus",
-      p."visibilityReason",
-      p."visibilityUpdatedAt",
-      a.location AS address_location,
-      a.latitude AS latitude_val,
-      a.longitude AS longitude_val,
-      ST_Distance(
-        a.location,
-        ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)
-      ) * 111.32 AS distance_m
-    FROM "Provider" p
-    JOIN "Address" a ON a."providerId" = p.id
-    JOIN "User" u ON p."userId" = u.id
-        WHERE u.status = 'ACTIVE'
-          AND p."verificationStatus" = 'APPROVED'
-          AND p."visibilityStatus" = 'VISIBLE'
-          AND a.location IS NOT NULL
-          AND ST_DWithin(
-            a.location,
-            ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326),
-            ${radius / 111.32}
-          )
-    ORDER BY distance_m ASC
-    LIMIT ${limit} OFFSET ${offset}
-  `,
+        const radiusMeters = Math.max(radius * 1000, 0);
+        const rawProviders: any[] = await this.findNearbyProvidersRaw(
+          latitude,
+          longitude,
+          radiusMeters,
+          limit ?? 20,
         );
 
         if (rawProviders.length === 0) {
@@ -1713,6 +1831,7 @@ export class ProvidersService {
               ocrResult: rp.ocrResult,
               livenessResult: rp.livenessResult,
               badges: rp.badges || [],
+              sortPriority: typeof rp.sortPriority === 'number' ? rp.sortPriority : Number(rp.sortPriority) || 0,
               fiveStarReviewCount: rp.fiveStarReviewCount || 0,
               monthlyBookingsCount: rp.monthlyBookingsCount || 0,
               acceptanceRate: rp.acceptanceRate || 0,
