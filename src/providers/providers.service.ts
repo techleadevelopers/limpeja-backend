@@ -51,7 +51,7 @@ const addressSelectWithoutLocation = {
     providerId: true,
     clientId: true,
   },
-};
+} as const;
 
 export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
   include: {
@@ -64,7 +64,7 @@ export type ProviderWithIncludes = Prisma.ProviderGetPayload<{
         phone: true;
       };
     };
-    address: addressSelectWithoutLocation;
+    address: typeof addressSelectWithoutLocation;
     providerServices: { include: { service: true } };
     reviewsReceived: {
       include: {
