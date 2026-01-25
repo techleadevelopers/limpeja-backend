@@ -15,6 +15,7 @@ import * as Sentry from '@sentry/node'; // NEW: Import Sentry (conceptual, requi
 import type { SeverityLevel } from '@sentry/core';
 import axios from 'axios';
 import { WhatsappService } from '../services/whatsappService';
+import { NotificationService } from '../services/NotificationService';
 
 type WhatsappFallbackContext = {
   bookingId?: string;
@@ -45,6 +46,7 @@ export class NotificationsService {
     private readonly i18n: I18nService,
     private readonly configService: ConfigService,
     private readonly whatsappService: WhatsappService,
+    private readonly notificationService: NotificationService,
   ) {
     this.dedupeWindowSeconds = this.configService.get<number>(
       'notifications.dedupeWindowSeconds',
@@ -512,6 +514,17 @@ export class NotificationsService {
       return false;
     }
   }
+  async subscribeCurrentUserToTopic(userId: string, topic: string): Promise<void> {
+    await this.notificationService.subscribeUserToTopic(userId, topic);
+  }
+
+  async unsubscribeCurrentUserFromTopic(
+    userId: string,
+    topic: string,
+  ): Promise<void> {
+    await this.notificationService.unsubscribeUserFromTopic(userId, topic);
+  }
+
   private async attemptWhatsappFallback(
     userId: string,
     context: WhatsappFallbackContext,
